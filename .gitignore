@@ -164,3 +164,8 @@ cython_debug/
 
 .kilo/
 work/
+
+tests/
+
+data/
+temp/
