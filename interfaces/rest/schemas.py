@@ -20,6 +20,7 @@ __all__ = [
     "ContainerIdsResponse",
     "ExpirationRequest",
     "ExpirationResponse",
+    "ErrorResponse",
 ]
 
 
@@ -96,3 +97,10 @@ class ExpirationResponse(BaseModel):
     container_id: str
     expiration_hours: int
     expiration: Optional[str]
+
+
+class ErrorResponse(BaseModel):
+    """错误响应。"""
+
+    code: str
+    message: str
