@@ -38,7 +38,7 @@ class CreateContainerRequest(BaseModel):
                     "gitee_user": "test_name",
                     "gitee_repository": "test_project",
                     "gitee_branch": "develop",
-                    "expiration_hours": 24,
+                    "expiration_hours": settings.container_default_expiration_hours,
                     "authorize_general_account": True,
                 }
             ]
@@ -86,7 +86,11 @@ class ContainerIdsResponse(BaseModel):
 class ExpirationRequest(BaseModel):
     """设置容器运行时长请求。"""
 
-    model_config = ConfigDict(json_schema_extra={"examples": [{"expiration_hours": 24}]})
+    model_config = ConfigDict(
+        json_schema_extra={
+            "examples": [{"expiration_hours": settings.container_default_expiration_hours}]
+        }
+    )
 
     expiration_hours: int = Field()
 

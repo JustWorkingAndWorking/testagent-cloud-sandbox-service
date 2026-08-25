@@ -112,7 +112,7 @@ def query_container_ids(
     return ContainerIdsResponse(container_ids=ids)
 
 
-@router.get("/{container_id}", response_model=ContainerStatusResponse, responses=_responses("成功 (无内容)", 204, 404))
+@router.get("/{container_id}", response_model=ContainerStatusResponse, responses=_responses("成功", 200, 404))
 def get_container_status(container_id: str) -> ContainerStatusResponse:
     """查询指定容器运行状态。"""
     view = container.get_status(container_id)
