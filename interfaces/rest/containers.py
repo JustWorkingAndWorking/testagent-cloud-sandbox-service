@@ -26,9 +26,14 @@ from interfaces.rest.schemas import (
 router = APIRouter(prefix="/containers", tags=["containers"])
 
 
-@router.post("", response_model=CreateContainerResponse, status_code=200)
+@router.post(
+    "",
+    response_model=CreateContainerResponse,
+    status_code=200,
+    openapi_extra={"requestBody": {"description": "创建容器参数；固定使用管理员配置的镜像。"}},
+)
 def create_container(request: CreateContainerRequest) -> CreateContainerResponse:
-    """创建并自动启动容器（固定使用当前配置的默认镜像）。"""
+    """创建并启动容器，固定使用管理员配置的镜像。"""
     created = container.create_container(
         container.CreateContainerParams(
             user_id=request.user_id,
@@ -53,12 +58,12 @@ def create_container(request: CreateContainerRequest) -> CreateContainerResponse
 
 @router.get("", response_model=ContainerIdsResponse)
 def query_container_ids(
-    user_id: Optional[str] = None,
+    user_id: str,
     gitee_user: Optional[str] = None,
     gitee_repository: Optional[str] = None,
     gitee_branch: Optional[str] = None,
 ) -> ContainerIdsResponse:
-    """按业务条件查询容器 ID（AND 组合，不含业务已删除）。"""
+    """按业务条件查询容器 ID。"""
     ids = container.query_container_ids(
         user_id=user_id,
         gitee_user=gitee_user,
@@ -70,7 +75,7 @@ def query_container_ids(
 
 @router.get("/{container_id}", response_model=ContainerStatusResponse)
 def get_container_status(container_id: str) -> ContainerStatusResponse:
-    """查询容器运行状态。"""
+    """查询指定容器运行状态。"""
     view = container.get_status(container_id)
     return ContainerStatusResponse(
         container_id=view.container_id,
@@ -83,35 +88,39 @@ def get_container_status(container_id: str) -> ContainerStatusResponse:
 
 @router.post("/{container_id}/start", status_code=204)
 def start(container_id: str) -> Response:
-    """启动容器（已运行重复调用幂等成功）。"""
+    """启动指定容器。"""
     container.start(container_id)
     return Response(status_code=204)
 
 
 @router.post("/{container_id}/stop", status_code=204)
 def stop(container_id: str) -> Response:
-    """停止容器（已停止重复调用幂等成功）。"""
+    """停止指定容器。"""
     container.stop(container_id)
     return Response(status_code=204)
 
 
 @router.post("/{container_id}/kill", status_code=204)
 def kill(container_id: str) -> Response:
-    """强制终止容器（已停止重复调用幂等成功）。"""
+    """强制停止指定容器。"""
     container.kill(container_id)
     return Response(status_code=204)
 
 
 @router.post("/{container_id}/restart", status_code=204)
 def restart(container_id: str) -> Response:
-    """重启容器（Container ID 不变）。"""
+    """重启指定容器。"""
     container.restart(container_id)
     return Response(status_code=204)
 
 
-@router.post("/{container_id}/expiration", response_model=ExpirationResponse)
+@router.post(
+    "/{container_id}/expiration",
+    response_model=ExpirationResponse,
+    openapi_extra={"requestBody": {"description": "新的容器运行时长 (小时)。"}},
+)
 def set_expiration(container_id: str, request: ExpirationRequest) -> ExpirationResponse:
-    """设置业务有效时长（仅修改时长，不重置创建时间；0 表示永不过期）。"""
+    """设置指定容器运行时长 (0 表示一直运行)。"""
     view = container.set_expiration(container_id, request.expiration_hours)
     return ExpirationResponse(
         container_id=view.container_id,
@@ -122,6 +131,6 @@ def set_expiration(container_id: str, request: ExpirationRequest) -> ExpirationR
 
 @router.post("/{container_id}/delete", status_code=204)
 def business_delete(container_id: str) -> Response:
-    """业务删除容器（停止并进入保留期；已业务删除重复调用幂等成功）。"""
+    """删除指定容器。"""
     container.business_delete(container_id)
     return Response(status_code=204)
