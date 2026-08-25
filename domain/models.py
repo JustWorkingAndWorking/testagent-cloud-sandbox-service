@@ -17,7 +17,8 @@ from typing import Optional
 __all__ = [
     "ContainerStatus",
     "Container",
-    "map_runtime_state"
+    "map_runtime_state",
+    "add_hours_to_iso"
 ]
 
 
