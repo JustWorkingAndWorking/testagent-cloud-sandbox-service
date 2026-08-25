@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from config import settings
 
@@ -26,18 +26,32 @@ __all__ = [
 class CreateContainerRequest(BaseModel):
     """创建容器请求。
 
-    请求不含镜像信息，固定使用当前配置的默认镜像。
+    创建容器时固定使用管理员设置的默认镜像。
     """
 
-    user_id: str = Field(description="业务用户 ID")
-    gitee_user: str = Field(description="Gitee 用户名")
-    gitee_repository: str = Field(description="Gitee 仓库名")
-    gitee_branch: Optional[str] = Field(default=None, description="Gitee 分支（可选）")
+    model_config = ConfigDict(
+        json_schema_extra={
+            "examples": [
+                {
+                    "user_id": "10001",
+                    "gitee_user": "test_name",
+                    "gitee_repository": "test_project",
+                    "gitee_branch": "develop",
+                    "expiration_hours": 24,
+                    "authorize_general_account": True,
+                }
+            ]
+        }
+    )
+
+    user_id: str = Field(description="用户 ID")
+    gitee_user: str = Field(description="码云用户名")
+    gitee_repository: str = Field(description="码云仓库")
+    gitee_branch: Optional[str] = Field(default=None, description="仓库分支 (可选)")
     expiration_hours: Optional[int] = Field(
         default=settings.container_default_expiration_hours,
-        description=f"业务删除时长（小时）；默认 {settings.container_default_expiration_hours} 小时（当前配置）；0 表示永不过期",
     )
-    authorize_general_account: bool = Field(description="是否授权通用账户（必填）")
+    authorize_general_account: bool = Field(description="是否授权通用码云账户")
 
 
 class CreateContainerResponse(BaseModel):
@@ -49,7 +63,7 @@ class CreateContainerResponse(BaseModel):
     endpoint: Optional[str] = None
     started_at: Optional[str] = None
     expiration: Optional[str] = None
-    authorize_general_account: bool = Field(description="是否授权通用账户")
+    authorize_general_account: bool = Field(description="是否授权通用码云账户")
 
 
 class ContainerStatusResponse(BaseModel):
@@ -69,13 +83,15 @@ class ContainerIdsResponse(BaseModel):
 
 
 class ExpirationRequest(BaseModel):
-    """设置业务有效时长请求。"""
+    """设置容器运行时长请求。"""
 
-    expiration_hours: int = Field(description="业务删除时长（小时）；0 表示永不过期")
+    model_config = ConfigDict(json_schema_extra={"examples": [{"expiration_hours": 24}]})
+
+    expiration_hours: int = Field()
 
 
 class ExpirationResponse(BaseModel):
-    """设置业务有效时长响应。"""
+    """设置容器运行时长响应。"""
 
     container_id: str
     expiration_hours: int
