@@ -15,7 +15,7 @@ import threading
 import uuid
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 from zoneinfo import ZoneInfo
 
 from config import Constants, settings
@@ -35,6 +35,9 @@ from infra.opensandbox.client import SandboxNotFoundError
 from infra.opensandbox.types import CreatedSandbox, SandboxEndpoint, SandboxStatus
 from infra.orm import Container as ContainerRow
 from infra.repositories import ContainerRepository
+
+if TYPE_CHECKING:
+    from infra.opensandbox.client import OpenSandboxClient
 
 logger = logging.getLogger(__name__)
 
@@ -102,10 +105,10 @@ class ExpirationView:
 # ---------------------------------------------------------------------------
 # 客户端惰性单例（供测试注入）
 # ---------------------------------------------------------------------------
-_opensandbox_client: Optional[object] = None
+_opensandbox_client: Optional[OpenSandboxClient] = None
 
 
-def _opensandbox():
+def _opensandbox() -> OpenSandboxClient:
     global _opensandbox_client
     if _opensandbox_client is None:
         from infra.opensandbox.client import OpenSandboxClient
