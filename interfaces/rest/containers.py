@@ -112,7 +112,7 @@ def query_container_ids(
     return ContainerIdsResponse(container_ids=ids)
 
 
-@router.get("/{container_id}", response_model=ContainerStatusResponse, responses=_responses("成功（无内容）", 204, 404))
+@router.get("/{container_id}", response_model=ContainerStatusResponse, responses=_responses("成功 (无内容)", 204, 404))
 def get_container_status(container_id: str) -> ContainerStatusResponse:
     """查询指定容器运行状态。"""
     view = container.get_status(container_id)
@@ -125,28 +125,28 @@ def get_container_status(container_id: str) -> ContainerStatusResponse:
     )
 
 
-@router.post("/{container_id}/start", status_code=204, responses=_responses("成功（无内容）", 204, 404))
+@router.post("/{container_id}/start", status_code=204, responses=_responses("成功 (无内容)", 204, 404))
 def start(container_id: str) -> Response:
     """启动指定容器。"""
     container.start(container_id)
     return Response(status_code=204)
 
 
-@router.post("/{container_id}/stop", status_code=204, responses=_responses("成功（无内容）", 204, 404))
+@router.post("/{container_id}/stop", status_code=204, responses=_responses("成功 (无内容)", 204, 404))
 def stop(container_id: str) -> Response:
     """停止指定容器。"""
     container.stop(container_id)
     return Response(status_code=204)
 
 
-@router.post("/{container_id}/kill", status_code=204, responses=_responses("成功（无内容）", 204, 404))
+@router.post("/{container_id}/kill", status_code=204, responses=_responses("成功 (无内容)", 204, 404))
 def kill(container_id: str) -> Response:
     """强制停止指定容器。"""
     container.kill(container_id)
     return Response(status_code=204)
 
 
-@router.post("/{container_id}/restart", status_code=204, responses=_responses("成功（无内容）", 204, 404))
+@router.post("/{container_id}/restart", status_code=204, responses=_responses("成功 (无内容)", 204, 404))
 def restart(container_id: str) -> Response:
     """重启指定容器。"""
     container.restart(container_id)
@@ -169,7 +169,7 @@ def set_expiration(container_id: str, request: ExpirationRequest) -> ExpirationR
     )
 
 
-@router.post("/{container_id}/delete", status_code=204, responses=_responses("成功（无内容）", 204, 404))
+@router.post("/{container_id}/delete", status_code=204, responses=_responses("成功 (无内容)", 204, 404))
 def delete(container_id: str) -> Response:
     """删除指定容器。"""
     container.business_delete(container_id)
