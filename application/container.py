@@ -199,7 +199,7 @@ def _resolve_image(params: CreateContainerParams) -> str:
         return params.image
     image = _cfg_default_image()
     if not image:
-        raise DefaultImageNotConfiguredError("未配置默认镜像")
+        raise DefaultImageNotConfiguredError("没有提供默认镜像，请联系管理员解决")
     return image
 
 
@@ -403,13 +403,18 @@ def set_expiration(container_id: str, expiration_hours: int) -> ExpirationView:
 # 业务条件查询（REST GET /containers）
 # ---------------------------------------------------------------------------
 def query_container_ids(
+    user_id: str,
     *,
-    user_id: Optional[str] = None,
     gitee_user: Optional[str] = None,
     gitee_repository: Optional[str] = None,
     gitee_branch: Optional[str] = None,
 ) -> list[str]:
-    """按业务条件查询容器 ID（AND 组合，不含业务已删除，v4 §14.6）。"""
+    """按业务条件查询容器 ID（AND 组合，不含业务已删除，v4 §14.6）。
+
+    `user_id` 必填：REST 端点无认证，禁止不带用户标识枚举全部容器。
+    """
+    if not user_id or not user_id.strip():
+        raise InvalidArgumentError("user_id 不能为空")
     with session_scope() as session:
         rows = ContainerRepository(session).list_active(
             user_id=user_id,
