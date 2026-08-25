@@ -37,8 +37,17 @@ def create_app() -> FastAPI:
 
     @app.exception_handler(AppError)
     async def _app_error_handler(request: Request, exc: AppError) -> JSONResponse:
-        _ = request
-        # 底层错误已在 infra/application 层记录；此处仅返回对外摘要
+        # 底层错误已在 infra/application 层记录；此处记录请求上下文与业务码
+        if exc.http_status >= 500:
+            logger.error(
+                "REST %s %s -> HTTP %s [%s] %s",
+                request.method, request.url.path, exc.http_status, exc.code, exc.message,
+            )
+        else:
+            logger.warning(
+                "REST %s %s -> HTTP %s [%s] %s",
+                request.method, request.url.path, exc.http_status, exc.code, exc.message,
+            )
         return JSONResponse(
             status_code=exc.http_status,
             content={"code": exc.code, "message": exc.message},
@@ -46,7 +55,12 @@ def create_app() -> FastAPI:
 
     @app.exception_handler(RequestValidationError)
     async def _validation_error_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
-        _ = request, exc
+        logger.warning(
+            "REST 参数校验失败 %s %s: %s",
+            request.method,
+            request.url.path,
+            [str(e) for e in exc.errors()],
+        )
         return JSONResponse(
             status_code=400,
             content={"code": "invalid_argument", "message": "请求参数非法"},
@@ -54,7 +68,6 @@ def create_app() -> FastAPI:
 
     @app.exception_handler(Exception)
     async def _internal_error_handler(request: Request, exc: Exception) -> JSONResponse:
-        _ = exc
         logger.exception("REST 内部错误: %s %s", request.method, request.url.path)
         return JSONResponse(
             status_code=500,
@@ -66,10 +79,16 @@ def create_app() -> FastAPI:
         if request.url.path in _DOC_PATHS and not _authorized(request):
             return JSONResponse(
                 status_code=401,
-                content={"code": "unauthorized", "message": "Unauthorized"},
+                content={"code": "unauthorized", "message": "未认证"},
                 headers={"WWW-Authenticate": 'Basic realm="docs"'},
             )
         return await call_next(request)
+
+    @app.middleware("http")
+    async def _server_header(request: Request, call_next):
+        response = await call_next(request)
+        response.headers["server"] = "testagent-cloud"
+        return response
 
     return app
 
