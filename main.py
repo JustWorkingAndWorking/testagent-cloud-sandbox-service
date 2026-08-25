@@ -24,7 +24,7 @@ def main() -> None:
         stream=sys.stdout,
     )
     logger = logging.getLogger("main")
-    logger.info("初始化数据库…")
+    logger.info("初始化数据库中...")
     init_db()
 
     stop_event = threading.Event()
@@ -32,9 +32,9 @@ def main() -> None:
         target=run_loop, args=(stop_event,), daemon=True, name="scheduler"
     )
     scheduler_thread.start()
-    logger.info("Scheduler 已启动（周期 %ss）", settings.scheduler_poll_interval_seconds)
+    logger.info("调度服务已启动 (调度周期 %ss)", settings.scheduler_poll_interval_seconds)
 
-    logger.info("REST API 启动: http://0.0.0.0:%s", settings.rest_api_port)
+    logger.info("REST API 启动: http://127.0.0.1:%s", settings.rest_api_port)
     import uvicorn
 
     from interfaces.rest.app import create_app  # noqa: PLC0415
