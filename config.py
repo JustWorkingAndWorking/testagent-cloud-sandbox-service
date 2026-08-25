@@ -14,23 +14,20 @@
 from __future__ import annotations
 
 import os
+from contextlib import contextmanager
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import cast
-from typing import Literal, Optional
+from typing import Iterator, Literal, Optional, cast
 
 __all__ = [
     "ConfigError",
     "Constants",
     "settings",
-    # "CONTAINER_CREATE_LIMIT_MODES",
-    # "SETTINGS_KEY_DEFAULT_IMAGE",
-    # "SETTINGS_KEY_CONTAINER_COUNT_LIMIT",
-    # "get_default_image",
-    # "set_default_image",
-    # "get_container_count_limit",
-    # "set_container_count_limit",
+    "get_default_image",
+    "set_default_image",
+    "get_container_count_limit",
+    "set_container_count_limit",
 ]
 
 _ENV_PREFIX = "TA_SS_"
@@ -158,51 +155,53 @@ settings: Settings = Settings(
 )
 
 
-# # ---------------------------------------------------------------------------
-# # settings 读写（v4 §4.3 / §6.2.2）：`default_image` / `container_count_limit`
-# # 应用层与接口层通过本模块访问，不直接操作 settings 表。
-# # ---------------------------------------------------------------------------
-#
-# SETTINGS_KEY_DEFAULT_IMAGE = "default_image"
-# SETTINGS_KEY_CONTAINER_COUNT_LIMIT = "container_count_limit"
-#
-#
-# def _settings_scope() -> Iterator["SettingsRepository"]:
-#     from infra.db import session_scope
-#     from infra.repositories import SettingsRepository
-#
-#     with session_scope() as session:
-#         yield SettingsRepository(session)
-#
-#
-# def get_default_image() -> Optional[str]:
-#     """读取默认镜像完整引用；未设置返回 None。"""
-#     with _settings_scope() as repo:
-#         return repo.get(SETTINGS_KEY_DEFAULT_IMAGE)
-#
-#
-# def set_default_image(value: Optional[str]) -> None:
-#     """设置默认镜像完整引用；传 None 表示取消默认。"""
-#     with _settings_scope() as repo:
-#         if value is None:
-#             repo.delete(SETTINGS_KEY_DEFAULT_IMAGE)
-#         else:
-#             repo.set(SETTINGS_KEY_DEFAULT_IMAGE, value)
-#
-#
-# def get_container_count_limit() -> int:
-#     """读取容器数量限制；数据库未设置时返回 `TA_SS_CONTAINER_DEFAULT_COUNT_LIMIT`。"""
-#     with _settings_scope() as repo:
-#         raw = repo.get(SETTINGS_KEY_CONTAINER_COUNT_LIMIT)
-#     if raw is None:
-#         return settings.container_default_count_limit
-#     try:
-#         return int(raw)
-#     except ValueError:
-#         raise ConfigError(f"数据库中的容器数量限制非法: {raw!r}")
-#
-#
-# def set_container_count_limit(value: int) -> None:
-#     """设置容器数量限制。"""
-#     with _settings_scope() as repo:
-#         repo.set(SETTINGS_KEY_CONTAINER_COUNT_LIMIT, str(int(value)))
+# ---------------------------------------------------------------------------
+# settings 读写（v4 §4.3 / §6.2.2）：`default_image` / `container_count_limit`
+# 应用层与接口层通过本模块访问，不直接操作 settings 表。
+# ---------------------------------------------------------------------------
+
+SETTINGS_KEY_DEFAULT_IMAGE = "default_image"
+SETTINGS_KEY_CONTAINER_COUNT_LIMIT = "container_count_limit"
+
+
+@contextmanager
+def _settings_scope() -> Iterator:
+    from infra.db import session_scope
+    from infra.repositories import SettingsRepository
+
+    with session_scope() as session:
+        yield SettingsRepository(session)
+
+
+def get_default_image() -> Optional[str]:
+    """读取默认镜像完整引用；未设置返回 None。"""
+    with _settings_scope() as repo:
+        row = repo.get(SETTINGS_KEY_DEFAULT_IMAGE)
+    return row.value if row is not None else None
+
+
+def set_default_image(value: Optional[str]) -> None:
+    """设置默认镜像完整引用；传 None 表示取消默认。"""
+    with _settings_scope() as repo:
+        if value is None:
+            repo.delete(SETTINGS_KEY_DEFAULT_IMAGE)
+        else:
+            repo.set(SETTINGS_KEY_DEFAULT_IMAGE, value)
+
+
+def get_container_count_limit() -> int:
+    """读取容器数量限制；数据库未设置时返回 `TA_SS_CONTAINER_DEFAULT_COUNT_LIMIT`。"""
+    with _settings_scope() as repo:
+        row = repo.get(SETTINGS_KEY_CONTAINER_COUNT_LIMIT)
+    if row is None:
+        return settings.container_default_count_limit
+    try:
+        return int(row.value)
+    except ValueError:
+        raise ConfigError(f"数据库中的容器数量限制非法: {row.value!r}")
+
+
+def set_container_count_limit(value: int) -> None:
+    """设置容器数量限制。"""
+    with _settings_scope() as repo:
+        repo.set(SETTINGS_KEY_CONTAINER_COUNT_LIMIT, str(int(value)))
