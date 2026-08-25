@@ -1,0 +1,187 @@
+"""
+后台调度服务（v4 §13）。
+
+- 单实例、独立于 Web / REST 请求运行；由 `run_loop` 定时编排。
+- **各类检查全部独立成可调用函数**（`expire_containers` / `purge_containers` /
+  `refresh_status_cache`），未来可由 Web 页面直接调用；循环仅负责按周期编排。
+- 全部动作幂等，重复执行无副作用（v4 §13.2）。
+- 运行状态写入进程内内存缓存（不写 SQLite），供 Web 展示（v4 §13.2/§8.3）。
+"""
+
+from __future__ import annotations
+
+import logging
+import threading
+from datetime import datetime, timedelta
+from typing import Optional
+from zoneinfo import ZoneInfo
+
+from config import Constants, settings
+from application import container as _container
+from domain.models import ContainerStatus, add_hours_to_iso, map_runtime_state
+from infra.db import session_scope
+from infra.opensandbox.client import SandboxNotFoundError
+from infra.repositories import ContainerRepository
+
+logger = logging.getLogger(__name__)
+
+__all__ = [
+    "expire_containers",
+    "purge_containers",
+    "refresh_status_cache",
+    "compensate",
+    "run_loop",
+    "get_cached_status",
+    "all_cached_statuses",
+]
+
+_TZ = ZoneInfo(Constants.TIMEZONE.value)
+
+#: 进程内运行状态缓存：container_id -> 业务状态（v4 §13.2；Web 读取，不落库）
+_status_cache: dict[str, ContainerStatus] = {}
+
+
+def _now() -> datetime:
+    return datetime.now(_TZ)
+
+
+# ---------------------------------------------------------------------------
+# T7.2 业务过期检查（独立；可被 Web 调用）
+# ---------------------------------------------------------------------------
+def expire_containers() -> list[str]:
+    """`created_at + expiration_hours` 到期的活跃容器执行业务删除（Stop + 写 deleted_at）。
+
+    - `expiration_hours == 0`（永不过期）跳过；幂等（已业务删除的不再处理）。
+    - 单容器失败记录日志并继续，不影响整体扫描。
+    - 返回本次处理的容器 ID 列表。
+    """
+    expired: list[str] = []
+    with session_scope() as session:
+        rows = list(ContainerRepository(session).list_active())
+    now = _now()
+    for row in rows:
+        if row.expiration_hours <= 0:
+            continue
+        expires = add_hours_to_iso(row.created_at, row.expiration_hours)
+        if expires is not None and datetime.fromisoformat(expires) <= now:
+            try:
+                _container.business_delete(row.container_id)
+                expired.append(row.container_id)
+            except Exception:  # noqa: BLE001
+                logger.exception("业务过期处理失败: %s", row.container_id)
+    return expired
+
+
+# ---------------------------------------------------------------------------
+# T7.3 保留期检查（独立；物理删除前二次核对 deleted_at 防与 Web 恢复竞争）
+# ---------------------------------------------------------------------------
+def purge_containers() -> list[str]:
+    """`deleted_at + TA_SS_CONTAINER_RETENTION_HOURS` 到期即物理删除
+    （OpenSandbox Delete + 删除 SQLite 记录）。
+
+    - `retention_hours <= 0` 视为永不物理删除。
+    - 物理删除前在事务内二次核对 `deleted_at`（若已被 Web 恢复/清除则跳过），
+      并在同一事务内执行外部删除与记录删除，借助 SQLite 写锁与 Web 恢复互斥，避免竞争。
+    - 返回本次物理删除的容器 ID 列表。
+    """
+    retention = settings.container_retention_hours
+    if retention <= 0:
+        return []
+    purged: list[str] = []
+    now = _now()
+    with session_scope() as session:
+        repo = ContainerRepository(session)
+        for row in repo.list_all():
+            if row.deleted_at is None:
+                continue
+            deadline = datetime.fromisoformat(row.deleted_at) + timedelta(hours=retention)
+            if deadline > now:
+                continue
+            # 二次核对：Web 恢复（清 deleted_at）或已删除时跳过
+            current = repo.get(row.container_id)
+            if current is None or current.deleted_at is None:
+                continue
+            try:
+                _container._opensandbox().delete(row.container_id)
+            except Exception:  # noqa: BLE001
+                logger.exception("保留期物理删除失败（外部删除）: %s", row.container_id)
+                continue
+            repo.delete(row.container_id)
+            _status_cache.pop(row.container_id, None)
+            purged.append(row.container_id)
+    return purged
+
+
+# ---------------------------------------------------------------------------
+# T7.4 运行状态刷新（独立；写内存缓存，供 Web 展示）
+# ---------------------------------------------------------------------------
+def refresh_status_cache() -> None:
+    """刷新全部活跃容器的运行状态到进程内缓存；清理已不存在容器的缓存项。
+
+    状态映射（v4 §8.3）：运行 → `running`；已停止 → `stopped`；创建/重启期间 → `pending`；
+    不可达 → `unknown`；sandbox 已消失 → `stopped`。
+    """
+    with session_scope() as session:
+        rows = list(ContainerRepository(session).list_active())
+    active_ids: set[str] = set()
+    for row in rows:
+        active_ids.add(row.container_id)
+        _status_cache[row.container_id] = _fetch_status(row.container_id)
+    for stale in [cid for cid in _status_cache if cid not in active_ids]:
+        _status_cache.pop(stale, None)
+
+
+def _fetch_status(container_id: str) -> ContainerStatus:
+    try:
+        status = _container._opensandbox().get_status(container_id)
+    except SandboxNotFoundError:
+        return ContainerStatus.STOPPED  # 与状态查询（T6.7）语义一致
+    except Exception:  # noqa: BLE001
+        logger.exception("状态刷新失败: %s", container_id)
+        return ContainerStatus.UNKNOWN
+    return map_runtime_state(status.state)
+
+
+def get_cached_status(container_id: str) -> Optional[ContainerStatus]:
+    """读取进程内缓存的状态（Web 展示用）；无缓存返回 None。"""
+    return _status_cache.get(container_id)
+
+
+def all_cached_statuses() -> dict[str, ContainerStatus]:
+    """返回全部缓存状态快照（Web 展示用）。"""
+    return dict(_status_cache)
+
+
+# ---------------------------------------------------------------------------
+# T7.5 补偿
+# ---------------------------------------------------------------------------
+def compensate() -> list[str]:
+    """进程重启后的首次补齐：扫描全部持久化记录，补齐到期的业务删除与保留期物理删除。
+
+    幂等：不重复执行已完成动作（业务删除/物理删除均天然幂等）。
+    """
+    done = expire_containers()
+    done += purge_containers()
+    return done
+
+
+# ---------------------------------------------------------------------------
+# T7.1 定时循环
+# ---------------------------------------------------------------------------
+def run_loop(stop_event: threading.Event) -> None:
+    """单实例后台循环：先补偿一次，再按周期执行过期 / 保留期 / 状态刷新检查。
+
+    周期：`TA_SS_SCHEDULER_POLL_INTERVAL_SECONDS`（v4 §13.1）。
+    """
+    try:
+        compensate()
+    except Exception:  # noqa: BLE001
+        logger.exception("初启补偿失败")
+    interval = settings.scheduler_poll_interval_seconds
+    steps = (expire_containers, purge_containers, refresh_status_cache)
+    while not stop_event.wait(interval):
+        for step in steps:
+            try:
+                step()
+            except Exception:  # noqa: BLE001
+                logger.exception("调度检查异常: %s", step.__name__)
