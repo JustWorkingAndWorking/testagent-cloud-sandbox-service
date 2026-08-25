@@ -365,7 +365,7 @@ def delete_image(full_ref: str, also_registry: bool) -> DeleteResult:
                 registry_failed=True,
                 error_summary="Registry 删除未成功",
             )
-    except Exception as exc:
+    except Exception:
         # 底层记录日志，这里保持本地结果并提示，不回滚
         logger.exception("Registry 删除失败（保持本地删除结果）: %s", full_ref)
         result = DeleteResult(
