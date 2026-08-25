@@ -393,7 +393,7 @@ def set_expiration(container_id: str, expiration_hours: int) -> ExpirationView:
         repo = ContainerRepository(session)
         row = repo.get(container_id)
         if row is None or row.deleted_at is not None:
-            raise ContainerNotFoundError("容器不存在（含业务已删除 / 已物理删除）")
+            raise ContainerNotFoundError("容器不存在")
         repo.update_expiration(container_id, expiration_hours)
         expiration = add_hours_to_iso(row.created_at, expiration_hours)
     return ExpirationView(container_id=container_id, expiration_hours=expiration_hours, expiration=expiration)
@@ -433,5 +433,5 @@ def _require_active_record(container_id: str) -> ContainerRow:
     with session_scope() as session:
         row = ContainerRepository(session).get(container_id)
     if row is None or row.deleted_at is not None:
-        raise ContainerNotFoundError("容器不存在（含业务已删除 / 已物理删除）")
+        raise ContainerNotFoundError("容器不存在")
     return row
