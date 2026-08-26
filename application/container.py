@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import logging
+import math
 import threading
 import uuid
 from dataclasses import dataclass
@@ -68,12 +69,16 @@ _create_lock = threading.Lock()
 @dataclass(frozen=True)
 class CreateContainerParams:
     user_id: str
-    gitee_user: str
-    gitee_repository: str
-    gitee_branch: Optional[str] = None
-    expiration_hours: Optional[int] = None
     image: Optional[str] = None
+    gitee_user: Optional[str] = None
+    gitee_repository: Optional[str] = None
+    gitee_branch: Optional[str] = None
     authorize_general_account: bool = True
+    expiration_hours: Optional[int] = None
+    #: CPU 核数，无单位，例如 0.5 / 1
+    cpu: Optional[float] = None
+    #: 内存大小，单位固定 Gi，例如 1 / 2
+    memory: Optional[int] = None
 
 
 @dataclass(frozen=True)
@@ -139,8 +144,8 @@ def create_container(params: CreateContainerParams) -> CreatedContainer:
     - 创建限制（模式 / 数量）在此校验，白名单用户跳过全部；并发通过进程互斥 + SQLite 单写者保证。
     - 容器名：随机字符串（仅表示容器本身，不承载业务信息）；端口固定 22；
       环境变量注入 `TESTAGENT_CLOUD_USER_ID` / `TESTAGENT_CLOUD_GITEE_USER` /
-      `TESTAGENT_CLOUD_GITEE_REPOSITORY` / `TESTAGENT_CLOUD_GITEE_BRANCH`（为空也注入空值）
-      及 `TESTAGENT_CLOUD_AUTHORIZE_GENERAL_ACCOUNT`（true/false）。
+       `TESTAGENT_CLOUD_GITEE_REPOSITORY` / `TESTAGENT_CLOUD_GITEE_BRANCH`（为空也注入空值）
+       及 `TESTAGENT_CLOUD_AUTHORIZE_GENERAL_ACCOUNT`（true/false）；CPU / 内存可选覆盖默认资源限制。
     """
     image = _resolve_image(params)
     expiration_hours = params.expiration_hours if params.expiration_hours is not None \
@@ -152,12 +157,12 @@ def create_container(params: CreateContainerParams) -> CreatedContainer:
     with _create_lock:
         with session_scope() as session:
             repo = ContainerRepository(session)
-            _check_creation_limits(repo, params.user_id, params.gitee_repository)
+            _check_creation_limits(repo, params.user_id, params.gitee_repository or "")
 
         env = {
             "TESTAGENT_CLOUD_USER_ID": params.user_id,
-            "TESTAGENT_CLOUD_GITEE_USER": params.gitee_user,
-            "TESTAGENT_CLOUD_GITEE_REPOSITORY": params.gitee_repository,
+            "TESTAGENT_CLOUD_GITEE_USER": params.gitee_user or "",
+            "TESTAGENT_CLOUD_GITEE_REPOSITORY": params.gitee_repository or "",
             "TESTAGENT_CLOUD_GITEE_BRANCH": params.gitee_branch or "",
             "TESTAGENT_CLOUD_AUTHORIZE_GENERAL_ACCOUNT": (
                 "true" if params.authorize_general_account else "false"
@@ -170,6 +175,7 @@ def create_container(params: CreateContainerParams) -> CreatedContainer:
                 name=container_name,
                 env=env,
                 metadata={"name": container_name},
+                resource_limits=_resource_limits(params),
             )
         except Exception as exc:
             raise ExternalDependencyError("创建容器失败") from exc
@@ -181,8 +187,8 @@ def create_container(params: CreateContainerParams) -> CreatedContainer:
                 ContainerRow(
                     container_id=container_id,
                     user_id=params.user_id,
-                    gitee_user=params.gitee_user,
-                    gitee_repository=params.gitee_repository,
+                    gitee_user=params.gitee_user or "",
+                    gitee_repository=params.gitee_repository or "",
                     gitee_branch=params.gitee_branch,
                     image=image,
                     created_at=created_at,
@@ -211,13 +217,33 @@ def _resolve_image(params: CreateContainerParams) -> str:
 
 
 def _validate_required(params: CreateContainerParams) -> None:
-    for field, value in (
-        ("user_id", params.user_id),
-        ("gitee_user", params.gitee_user),
-        ("gitee_repository", params.gitee_repository),
+    if not params.user_id or not params.user_id.strip():
+        raise InvalidArgumentError("user_id 不能为空")
+    if params.cpu is not None and (
+        isinstance(params.cpu, bool)
+        or not isinstance(params.cpu, (int, float))
+        or not math.isfinite(params.cpu)
+        or params.cpu <= 0
     ):
-        if not value or not str(value).strip():
-            raise InvalidArgumentError(f"{field} 不能为空")
+        raise InvalidArgumentError("cpu 必须为正数")
+    if params.memory is not None and (
+        isinstance(params.memory, bool)
+        or not isinstance(params.memory, int)
+        or params.memory <= 0
+    ):
+        raise InvalidArgumentError("memory 必须为正整数（单位 Gi）")
+
+
+def _resource_limits(params: CreateContainerParams) -> Optional[dict[str, str]]:
+    """仅在调用方指定资源时传递覆盖值；底层会与默认限额合并。"""
+    if params.cpu is None and params.memory is None:
+        return None
+    limits: dict[str, str] = {}
+    if params.cpu is not None:
+        limits["cpu"] = format(params.cpu, "g")
+    if params.memory is not None:
+        limits["memory"] = f"{params.memory}Gi"
+    return limits
 
 
 def _check_creation_limits(repo: ContainerRepository, user_id: str, gitee_repository: str) -> None:

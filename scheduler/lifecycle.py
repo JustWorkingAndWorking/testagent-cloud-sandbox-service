@@ -70,7 +70,8 @@ def expire_containers() -> list[str]:
                 expired.append(row.container_id)
             except Exception:  # noqa: BLE001
                 logger.exception("业务过期处理失败: %s", row.container_id)
-    logger.info("调度-业务过期检查: 扫描 %d 个活跃容器，业务删除 %d 个", len(rows), len(expired))
+    if expired:
+        logger.info("业务过期检查: 业务删除 %d 个", len(expired))
     return expired
 
 
@@ -88,7 +89,6 @@ def purge_containers() -> list[str]:
     """
     retention = settings.container_retention_hours
     if retention <= 0:
-        logger.info("调度-保留期检查: 未配置保留期，跳过")
         return []
     purged: list[str] = []
     now = _now()
@@ -113,7 +113,8 @@ def purge_containers() -> list[str]:
             repo.delete(row.container_id)
             _status_cache.pop(row.container_id, None)
             purged.append(row.container_id)
-    logger.info("调度-保留期检查: 物理删除 %d 个，其余未到期/已跳过", len(purged))
+    if purged:
+        logger.info("保留期检查: 物理删除 %d 个", len(purged))
     return purged
 
 
@@ -135,7 +136,8 @@ def refresh_status_cache() -> None:
     stale = [cid for cid in _status_cache if cid not in active_ids]
     for cid in stale:
         _status_cache.pop(cid, None)
-    logger.info("调度-状态刷新: 更新 %d 个容器状态，清理 %d 个失效项", len(rows), len(stale))
+    if rows or stale:
+        logger.info("状态刷新: 更新 %d 个容器状态，清理 %d 个失效项", len(rows), len(stale))
 
 
 def _fetch_status(container_id: str) -> ContainerStatus:
@@ -170,7 +172,8 @@ def compensate() -> list[str]:
     """
     done = expire_containers()
     done += purge_containers()
-    logger.info("调度-补偿完成：处理 %d 项", len(done))
+    if done:
+        logger.info("补偿完成：处理 %d 项", len(done))
     return done
 
 
@@ -196,4 +199,3 @@ def run_loop(stop_event: threading.Event) -> None:
                 step()
             except Exception:  # noqa: BLE001
                 logger.exception("调度检查异常: %s", step.__name__)
-        logger.info("调度-周期执行完成 (下一轮 %ss 后)", interval)

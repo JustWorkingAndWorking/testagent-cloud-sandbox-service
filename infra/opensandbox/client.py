@@ -65,7 +65,9 @@ class OpenSandboxClient:
     ) -> CreatedSandbox:
         """创建并自动启动容器（v4 §11.1）；`timeout=None` 表示生命周期由本服务管理。
 
-        服务端要求 `resourceLimits`（cpu/memory），默认 `{"cpu": "1", "memory": "1Gi"}`。
+        服务端要求 `resourceLimits`（cpu/memory），本服务将用户输入的无单位 CPU 核数与以 Gi
+        为单位的内存整数转换为 Kubernetes 风格字符串（例如 `0.5` → `"0.5"`、`2` → `"2Gi"`）。
+        默认值为 `{"cpu": "1", "memory": "1Gi"}`；调用方传入部分覆盖时保留另一项默认值。
         """
         payload = {"name": name}
         if metadata:
@@ -75,7 +77,7 @@ class OpenSandboxClient:
                 image,
                 env=env,
                 metadata=payload,
-                resource=resource_limits or _DEFAULT_RESOURCE_LIMITS,
+                resource={**_DEFAULT_RESOURCE_LIMITS, **(resource_limits or {})},
                 timeout=None,
                 connection_config=self._config,
                 skip_health_check=skip_health_check,

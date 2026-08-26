@@ -73,6 +73,8 @@ def create_container(request: CreateContainerRequest) -> CreateContainerResponse
             expiration_hours=request.expiration_hours,
             image=None,
             authorize_general_account=request.authorize_general_account,
+            cpu=request.cpu,
+            memory=request.memory,
         )
     )
     # 创建成功后实时查询一次端点与启动时间，随响应返回；查询失败回退空值不阻断创建
@@ -87,12 +89,10 @@ def create_container(request: CreateContainerRequest) -> CreateContainerResponse
         logger.warning("创建后实时查询端点/启动时间失败: %s", created.container_id)
     return CreateContainerResponse(
         container_id=created.container_id,
-        image=created.image,
         status=created.status.value,
         endpoint=endpoint,
         started_at=started_at,
-        expiration=add_hours_to_iso(created.created_at, created.expiration_hours),
-        authorize_general_account=created.authorize_general_account,
+        expires_at=add_hours_to_iso(created.created_at, created.expiration_hours),
     )
 
 

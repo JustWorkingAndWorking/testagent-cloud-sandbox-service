@@ -1,8 +1,8 @@
 """
 REST API 请求 / 响应模型（v4 §14.4~§14.9）。
 
-`POST /containers` 请求包含**必填**字段 `authorize_general_account`（bool），
-创建响应中原样返回。
+`POST /containers` 请求包含**必填**字段 `authorize_general_account`（bool），并支持可选的
+Gitee 信息与 CPU / 内存资源限制。
 """
 
 from __future__ import annotations
@@ -40,31 +40,41 @@ class CreateContainerRequest(BaseModel):
                     "gitee_branch": "develop",
                     "expiration_hours": settings.container_default_expiration_hours,
                     "authorize_general_account": True,
+                    "cpu": 1,
+                    "memory": 1,
                 }
             ]
         }
     )
 
     user_id: str = Field(description="用户 ID")
-    gitee_user: str = Field(description="码云用户名")
-    gitee_repository: str = Field(description="码云仓库")
-    gitee_branch: Optional[str] = Field(default=None, description="仓库分支 (可选)")
+    gitee_user: Optional[str] = Field(default=None, description="码云用户名")
+    gitee_repository: Optional[str] = Field(default=None, description="码云仓库")
+    gitee_branch: Optional[str] = Field(default=None, description="仓库分支")
     expiration_hours: Optional[int] = Field(
         default=settings.container_default_expiration_hours,
     )
     authorize_general_account: bool = Field(description="是否授权通用码云账户")
+    cpu: Optional[float] = Field(
+        default=None,
+        gt=0,
+        description="CPU 核数",
+    )
+    memory: Optional[int] = Field(
+        default=None,
+        gt=0,
+        description="内存大小 单位 Gi",
+    )
 
 
 class CreateContainerResponse(BaseModel):
     """创建容器响应。"""
 
     container_id: str
-    image: str
     status: str
     endpoint: Optional[str] = None
     started_at: Optional[str] = None
-    expiration: Optional[str] = None
-    authorize_general_account: bool = Field(description="是否授权通用码云账户")
+    expires_at: Optional[str] = None
 
 
 class ContainerStatusResponse(BaseModel):
