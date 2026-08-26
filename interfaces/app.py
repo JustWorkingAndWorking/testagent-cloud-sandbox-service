@@ -3,7 +3,7 @@ REST API 应用装配（v4 §14）。
 
 - 错误映射（T8.3）：400（参数非法/未配置默认镜像，含 Pydantic 校验）、404、409、500、502。
 - 文档访问控制（T8.4）：`/docs`、`/redoc`、`/openapi.json` 需 Basic 登录
-  （凭据 `TA_SS_WEB_USERNAME` / `TA_SS_WEB_PASSWORD`）；REST 业务端点不认证。
+  （凭据来自 `TA_SS_WEB_USERNAME` / `TA_SS_WEB_PASSWORD`）；REST 业务端点不认证。
 - 底层错误 MUST 写日志（v4 §14.10），对外只返回合理摘要。
 """
 
@@ -19,7 +19,7 @@ from fastapi.responses import JSONResponse
 
 from config import settings
 from domain.errors import AppError
-from interfaces.rest import containers
+from interfaces import containers
 
 logger = logging.getLogger(__name__)
 

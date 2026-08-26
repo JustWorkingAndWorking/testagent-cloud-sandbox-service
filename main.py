@@ -1,10 +1,10 @@
 """
-进程入口（T10.1，当前阶段：REST API + Scheduler；Web 随 T9 装配）。
+进程入口（T10.4：REST API + Scheduler）。
 
 - 环境变量由外部调用方注入（compose / shell 等，本进程不加载 .env）；
   导入 `config` 即触发必填环境变量校验，缺失即启动失败（v4 §5.1）。
 - 初始化 SQLite（幂等建表），启动单实例 Scheduler 后台循环（v4 §13.1）。
-- 以 uvicorn 承载 REST API（`0.0.0.0:{TA_SS_REST_API_PORT}`，默认 8080）。
+- 以 uvicorn 承载 REST API（`0.0.0.0:{TA_SS_REST_API_PORT}`，默认 8080）；本进程仅装配 REST API 与 Scheduler。
 """
 
 import logging
@@ -38,7 +38,7 @@ def main() -> None:
     logger.info("REST API 启动于: http://127.0.0.1:%s", settings.rest_api_port)
     import uvicorn
 
-    from interfaces.rest.app import create_app  # noqa: PLC0415
+    from interfaces.app import create_app  # noqa: PLC0415
 
     uvicorn.run(
         create_app(),

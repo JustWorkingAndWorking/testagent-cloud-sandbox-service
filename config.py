@@ -58,7 +58,7 @@ class Constants(Enum):
     UPLOAD_ALLOWED_EXTENSIONS = (".tar", ".tar.gz")
     #: 容器内 sshd 监听端口
     CONTAINER_SSH_PORT = 22
-    #: Web 分页默认每页条数（SHOULD）
+    #: 管理端分页默认每页条数（SHOULD）
     DEFAULT_PAGE_SIZE = 20
     #: 系统统一时区（UTC+8）
     TIMEZONE = "Asia/Shanghai"
@@ -84,16 +84,14 @@ class Settings:
     image_default_registry: str
     #: 镜像命名空间默认值
     image_default_namespace: str
-    #: Web 登录用户名
+    #: REST 文档 Basic 鉴权用户名
     web_username: str
-    #: Web 登录密码
+    #: REST 文档 Basic 鉴权密码
     web_password: str
     #: Scheduler 轮询周期（秒）
     scheduler_poll_interval_seconds: int
     #: REST API 监听端口（监听地址固定 0.0.0.0）
     rest_api_port: int
-    #: Web 监听端口（监听地址固定 0.0.0.0）
-    web_port: int
     #: 日志级别：DEBUG / INFO / WARNING / ERROR
     log_level: str
 
@@ -150,7 +148,6 @@ settings: Settings = Settings(
     web_password=_string("WEB_PASSWORD"),
     scheduler_poll_interval_seconds=_int("SCHEDULER_POLL_INTERVAL_SECONDS", 5),
     rest_api_port=_int("REST_API_PORT", 8080),
-    web_port=_int("WEB_PORT", 8081),
     log_level=_log_level,
 )
 

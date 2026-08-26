@@ -4,7 +4,7 @@ REST API 容器端点（v4 §14.3~§14.9）。
 - 端点薄壳：业务逻辑在应用层（`application.container`），本层仅做参数传递与响应组装。
 - 错误由 `AppError` 异常体系抛出，`app.py` 统一映射 HTTP 状态码（v4 §14.10）；
   各端点通过 `responses=` 将可能错误码完整写入 OpenAPI 文档。
-- Web 不通过 REST API 调用本服务（v4 §14.1）；本层不提供 Permanent Delete。
+- 用户 REST API 不提供 Permanent Delete；该能力仅由管理 API 提供。
 """
 
 from __future__ import annotations
@@ -16,7 +16,7 @@ from fastapi import APIRouter, Response
 
 from application import container
 from domain.models import add_hours_to_iso
-from interfaces.rest.schemas import (
+from interfaces.schemas import (
     ContainerIdsResponse,
     ContainerStatusResponse,
     CreateContainerRequest,

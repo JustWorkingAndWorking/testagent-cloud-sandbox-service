@@ -1,11 +1,11 @@
 """
 后台调度服务（v4 §13）。
 
-- 单实例、独立于 Web / REST 请求运行；由 `run_loop` 定时编排。
+- 单实例、独立于 REST 请求运行；由 `run_loop` 定时编排。
 - **各类检查全部独立成可调用函数**（`expire_containers` / `purge_containers` /
-  `refresh_status_cache`），未来可由 Web 页面直接调用；循环仅负责按周期编排。
+  `refresh_status_cache`），可由管理 API 读取缓存；循环仅负责按周期编排。
 - 调度扫描按业务状态排除已完成记录，重复扫描无副作用（v4 §13.2）。
-- 运行状态写入进程内内存缓存（不写 SQLite），供 Web 展示（v4 §13.2/§8.3）。
+- 运行状态写入进程内内存缓存（不写 SQLite），供管理 API 展示（v4 §13.2/§8.3）。
 """
 
 from __future__ import annotations
@@ -37,7 +37,7 @@ __all__ = [
 
 _TZ = ZoneInfo(Constants.TIMEZONE.value)
 
-#: 进程内运行状态缓存：container_id -> 业务状态（v4 §13.2；Web 读取，不落库）
+#: 进程内运行状态缓存：container_id -> 业务状态（v4 §13.2；管理 API 读取，不落库）
 _status_cache: dict[str, ContainerStatus] = {}
 
 
@@ -46,7 +46,7 @@ def _now() -> datetime:
 
 
 # ---------------------------------------------------------------------------
-# T7.2 业务过期检查（独立；可被 Web 调用）
+# T7.2 业务过期检查（独立；可被管理 API 调用）
 # ---------------------------------------------------------------------------
 def expire_containers() -> list[str]:
     """`created_at + expiration_hours` 到期的活跃容器执行业务删除（Stop + 写 deleted_at）。
@@ -76,15 +76,15 @@ def expire_containers() -> list[str]:
 
 
 # ---------------------------------------------------------------------------
-# T7.3 保留期检查（独立；物理删除前二次核对 deleted_at 防与 Web 恢复竞争）
+# T7.3 保留期检查（独立；物理删除前二次核对 deleted_at 防与管理 API 恢复竞争）
 # ---------------------------------------------------------------------------
 def purge_containers() -> list[str]:
     """`deleted_at + TA_SS_CONTAINER_RETENTION_HOURS` 到期即物理删除
     （OpenSandbox Delete + 删除 SQLite 记录）。
 
     - `retention_hours <= 0` 视为永不物理删除。
-    - 物理删除前在事务内二次核对 `deleted_at`（若已被 Web 恢复/清除则跳过），
-      并在同一事务内执行外部删除与记录删除，借助 SQLite 写锁与 Web 恢复互斥，避免竞争。
+    - 物理删除前在事务内二次核对 `deleted_at`（若已被管理 API 恢复/清除则跳过），
+      并在同一事务内执行外部删除与记录删除，借助 SQLite 写锁与管理 API 恢复互斥，避免竞争。
     - 返回本次物理删除的容器 ID 列表。
     """
     retention = settings.container_retention_hours
@@ -100,7 +100,7 @@ def purge_containers() -> list[str]:
             deadline = datetime.fromisoformat(row.deleted_at) + timedelta(hours=retention)
             if deadline > now:
                 continue
-            # 二次核对：Web 恢复（清 deleted_at）或已删除时跳过
+            # 二次核对：管理 API 恢复（清 deleted_at）或已删除时跳过
             current = repo.get(row.container_id)
             if current is None or current.deleted_at is None:
                 continue
@@ -119,7 +119,7 @@ def purge_containers() -> list[str]:
 
 
 # ---------------------------------------------------------------------------
-# T7.4 运行状态刷新（独立；写内存缓存，供 Web 展示）
+# T7.4 运行状态刷新（独立；写内存缓存，供管理 API 展示）
 # ---------------------------------------------------------------------------
 def refresh_status_cache() -> None:
     """刷新全部活跃容器的运行状态到进程内缓存；清理已不存在容器的缓存项。
@@ -153,12 +153,12 @@ def _fetch_status(container_id: str) -> ContainerStatus:
 
 
 def get_cached_status(container_id: str) -> Optional[ContainerStatus]:
-    """读取进程内缓存的状态（Web 展示用）；无缓存返回 None。"""
+    """读取进程内缓存的状态（管理 API 展示用）；无缓存返回 None。"""
     return _status_cache.get(container_id)
 
 
 def all_cached_statuses() -> dict[str, ContainerStatus]:
-    """返回全部缓存状态快照（Web 展示用）。"""
+    """返回全部缓存状态快照（管理 API 展示用）。"""
     return dict(_status_cache)
 
 

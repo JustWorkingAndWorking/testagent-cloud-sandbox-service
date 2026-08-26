@@ -3,7 +3,7 @@
 
 - 后端业务逻辑集中于此：创建（含创建限制原子校验）、操作（Start/Stop/Restart）、
   业务删除、恢复、立即删除、状态查询与剩余时间、设置业务有效时长、业务条件查询。
-- REST 与 Web 仅承担必要输入/输出，不重复业务判断。
+- REST 接口仅承担必要输入/输出，不重复业务判断。
 - 运行时状态来自 OpenSandbox（不落库）；业务数据写入 SQLite。
 - 创建限制在进程内互斥锁 + 事务中执行（v4 §11.2、§6.3 语义；SQLite 单写者 + 进程互斥，单实例部署）。
 """
@@ -249,7 +249,7 @@ def _check_creation_limits(repo: ContainerRepository, user_id: str, gitee_reposi
 
     计数口径：`running`/`pending` 计入、`stopped`/`business_deleted` 不计；
     当前以「非业务删除记录」计数（业务过期会先置 deleted_at 再停容器），
-    手动停止的特例仅在 Web 明确 Stop 后存在，仍视作占用预留槽位。
+    手动停止的容器仍视作占用预留槽位。
     """
     from application.whitelist import is_whitelisted
 
@@ -355,7 +355,7 @@ def business_delete(container_id: str) -> None:
 
 
 # ---------------------------------------------------------------------------
-# 恢复（T6.5，仅 Web）
+# 恢复（T6.5，仅管理 API）
 # ---------------------------------------------------------------------------
 def restore(container_id: str, expiration_hours: int) -> ContainerStatusView:
     """恢复：清除 `deleted_at`、重写 `created_at`（当前时间）与 `expiration_hours`，并启动容器。
@@ -381,7 +381,7 @@ def restore(container_id: str, expiration_hours: int) -> ContainerStatusView:
 
 
 # ---------------------------------------------------------------------------
-# 立即删除（T6.6，仅 Web）
+# 立即删除（T6.6，仅管理 API）
 # ---------------------------------------------------------------------------
 def permanent_delete(container_id: str) -> None:
     """立即删除：OpenSandbox Delete 物理删除底层容器 + 删除 SQLite 记录（v4 §11.4）。"""

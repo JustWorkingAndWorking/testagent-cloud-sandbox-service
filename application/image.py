@@ -2,7 +2,7 @@
 镜像管理应用层（v4 §10）。
 
 - 后端业务逻辑集中于此：镜像列表与可用性、上传（load）、推送（Push）、默认镜像管理、删除；
-  REST 与 Web 仅承担必要输入/输出与交互，不重复业务判断。
+  REST 接口仅承担必要输入/输出，不重复业务判断。
 - 数据源：本地 Docker（`infra.docker`）+ Registry（`infra.registry`）+ settings（`default_image`）。
 - 失败时：底层详细错误由 infra 层写日志，本层转换为对外业务异常（v4 §14.10）。
 """

@@ -1,8 +1,6 @@
 fastapi==0.141.1
 uvicorn==0.52.4
 
-nicegui==3.16.0
-
 pydantic==2.13.4
 sqlalchemy==2.0.52
 
