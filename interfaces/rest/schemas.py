@@ -74,6 +74,7 @@ class ContainerStatusResponse(BaseModel):
     status: str
     endpoint: Optional[str] = None
     started_at: Optional[str] = None
+    deleted_at: Optional[str] = None
     remaining_time: Optional[int] = None
 
 

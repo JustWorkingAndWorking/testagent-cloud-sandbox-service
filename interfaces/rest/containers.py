@@ -78,6 +78,7 @@ def create_container(request: CreateContainerRequest) -> CreateContainerResponse
     # 创建成功后实时查询一次端点与启动时间，随响应返回；查询失败回退空值不阻断创建
     endpoint: Optional[str] = None
     started_at: Optional[str] = None
+    # noinspection broad-exception
     try:
         view = container.get_status(created.container_id)
         endpoint = view.endpoint
@@ -121,6 +122,7 @@ def get_container_status(container_id: str) -> ContainerStatusResponse:
         status=view.status.value,
         endpoint=view.endpoint,
         started_at=view.started_at,
+        deleted_at=view.deleted_at,
         remaining_time=view.remaining_time,
     )
 

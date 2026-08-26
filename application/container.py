@@ -92,6 +92,7 @@ class ContainerStatusView:
     status: ContainerStatus
     endpoint: Optional[str] = None
     started_at: Optional[str] = None
+    deleted_at: Optional[str] = None
     remaining_time: Optional[int] = None
 
 
@@ -134,8 +135,9 @@ def create_container(params: CreateContainerParams) -> CreatedContainer:
     - 镜像：`params.image` 为空则使用默认镜像；默认镜像未配置抛 400 语义错误。
     - 创建限制（模式 / 数量）在此校验，白名单用户跳过全部；并发通过进程互斥 + SQLite 单写者保证。
     - 容器名：随机字符串（仅表示容器本身，不承载业务信息）；端口固定 22；
-      环境变量注入 `AGENT_USER_ID` / `AGENT_GITEE_USER` / `AGENT_GITEE_REPOSITORY` /
-      `AGENT_GITEE_BRANCH`（为空也注入空值）及 `AGENT_AUTHORIZE_GENERAL_ACCOUNT`（true/false）。
+      环境变量注入 `TESTAGENT_CLOUD_USER_ID` / `TESTAGENT_CLOUD_GITEE_USER` /
+      `TESTAGENT_CLOUD_GITEE_REPOSITORY` / `TESTAGENT_CLOUD_GITEE_BRANCH`（为空也注入空值）
+      及 `TESTAGENT_CLOUD_AUTHORIZE_GENERAL_ACCOUNT`（true/false）。
     """
     image = _resolve_image(params)
     expiration_hours = params.expiration_hours if params.expiration_hours is not None \
@@ -150,11 +152,13 @@ def create_container(params: CreateContainerParams) -> CreatedContainer:
             _check_creation_limits(repo, params.user_id, params.gitee_repository)
 
         env = {
-            "AGENT_USER_ID": params.user_id,
-            "AGENT_GITEE_USER": params.gitee_user,
-            "AGENT_GITEE_REPOSITORY": params.gitee_repository,
-            "AGENT_GITEE_BRANCH": params.gitee_branch or "",
-            "AGENT_AUTHORIZE_GENERAL_ACCOUNT": "true" if params.authorize_general_account else "false",
+            "TESTAGENT_CLOUD_USER_ID": params.user_id,
+            "TESTAGENT_CLOUD_GITEE_USER": params.gitee_user,
+            "TESTAGENT_CLOUD_GITEE_REPOSITORY": params.gitee_repository,
+            "TESTAGENT_CLOUD_GITEE_BRANCH": params.gitee_branch or "",
+            "TESTAGENT_CLOUD_AUTHORIZE_GENERAL_ACCOUNT": (
+                "true" if params.authorize_general_account else "false"
+            ),
         }
         container_name = uuid.uuid4().hex[:12]
         try:
@@ -255,6 +259,7 @@ def get_status(container_id: str) -> ContainerStatusView:
 
     business = map_runtime_state(status.state)
     endpoint: Optional[str] = None
+    # noinspection broad-exception
     try:
         ep: SandboxEndpoint = _opensandbox().get_endpoint(container_id, Constants.CONTAINER_SSH_PORT.value)
         endpoint = ep.endpoint
@@ -266,6 +271,7 @@ def get_status(container_id: str) -> ContainerStatusView:
         status=business,
         endpoint=endpoint,
         started_at=status.transitioned_at,
+        deleted_at=row.deleted_at,
         remaining_time=_remaining_seconds(row.created_at, row.expiration_hours),
     )
 
@@ -324,14 +330,17 @@ def restart(container_id: str) -> None:
 # 业务删除（T6.4）
 # ---------------------------------------------------------------------------
 def business_delete(container_id: str) -> None:
-    """业务删除：OpenSandbox Stop + 写 `deleted_at`，底层容器保留；重复调用幂等成功（v4 §11.4/14.9）。"""
+    """业务删除：OpenSandbox Stop + 写 `deleted_at`，底层容器保留。
+
+    已业务删除的容器再次删除一律视为不存在（404 语义，v4 §14.9 由最新约定覆盖）。
+    """
     with session_scope() as session:
         repo = ContainerRepository(session)
         row = repo.get(container_id)
         if row is None:
             raise ContainerNotFoundError("容器不存在")
         if row.deleted_at is not None:
-            return  # 已业务删除，幂等成功
+            raise ContainerNotFoundError("容器不存在")
         try:
             _opensandbox().stop(container_id)
         except Exception as exc:

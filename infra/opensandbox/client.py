@@ -28,6 +28,9 @@ __all__ = [
     "SandboxNotFoundError",
 ]
 
+#: 默认资源限额（服务端创建沙箱必需 `resourceLimits` 字段）
+_DEFAULT_RESOURCE_LIMITS: dict[str, str] = {"cpu": "1", "memory": "1Gi"}
+
 _T = TypeVar("_T")
 
 
@@ -58,8 +61,12 @@ class OpenSandboxClient:
         env: dict[str, str],
         metadata: Optional[dict[str, str]] = None,
         skip_health_check: bool = False,
+        resource_limits: Optional[dict[str, str]] = None,
     ) -> CreatedSandbox:
-        """创建并自动启动容器（v4 §11.1）；`timeout=None` 表示生命周期由本服务管理。"""
+        """创建并自动启动容器（v4 §11.1）；`timeout=None` 表示生命周期由本服务管理。
+
+        服务端要求 `resourceLimits`（cpu/memory），默认 `{"cpu": "1", "memory": "1Gi"}`。
+        """
         payload = {"name": name}
         if metadata:
             payload.update(metadata)
@@ -68,6 +75,7 @@ class OpenSandboxClient:
                 image,
                 env=env,
                 metadata=payload,
+                resource=resource_limits or _DEFAULT_RESOURCE_LIMITS,
                 timeout=None,
                 connection_config=self._config,
                 skip_health_check=skip_health_check,
