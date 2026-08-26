@@ -1,7 +1,7 @@
 """
 容器管理应用层（v4 §11、§14.5~§14.9）。
 
-- 后端业务逻辑集中于此：创建（含创建限制原子校验）、操作（Start/Stop/Kill/Restart）、
+- 后端业务逻辑集中于此：创建（含创建限制原子校验）、操作（Start/Stop/Restart）、
   业务删除、恢复、立即删除、状态查询与剩余时间、设置业务有效时长、业务条件查询。
 - REST 与 Web 仅承担必要输入/输出，不重复业务判断。
 - 运行时状态来自 OpenSandbox（不落库）；业务数据写入 SQLite。
@@ -51,7 +51,6 @@ __all__ = [
     "get_opensandbox_client",
     "start",
     "stop",
-    "kill",
     "restart",
     "business_delete",
     "restore",
@@ -93,7 +92,7 @@ class ContainerStatusView:
     status: ContainerStatus
     endpoint: Optional[str] = None
     started_at: Optional[str] = None
-    deleted_at: Optional[str] = None
+    expires_at: Optional[str] = None
     remaining_time: Optional[int] = None
 
 
@@ -275,7 +274,7 @@ def get_status(container_id: str) -> ContainerStatusView:
         status=business,
         endpoint=endpoint,
         started_at=status.transitioned_at,
-        deleted_at=row.deleted_at,
+        expires_at=add_hours_to_iso(row.created_at, row.expiration_hours),
         remaining_time=_remaining_seconds(row.created_at, row.expiration_hours),
     )
 
@@ -310,15 +309,6 @@ def stop(container_id: str) -> None:
         get_opensandbox_client().stop(container_id)
     except Exception as exc:
         raise ExternalDependencyError("停止容器失败") from exc
-
-
-def kill(container_id: str) -> None:
-    """强制终止，最终状态 stopped；已停止重复调用幂等成功（v4 §11.3）。"""
-    _require_active_record(container_id)
-    try:
-        get_opensandbox_client().kill(container_id)
-    except Exception as exc:
-        raise ExternalDependencyError("强制终止容器失败") from exc
 
 
 def restart(container_id: str) -> None:

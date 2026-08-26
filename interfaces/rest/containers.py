@@ -122,7 +122,7 @@ def get_container_status(container_id: str) -> ContainerStatusResponse:
         status=view.status.value,
         endpoint=view.endpoint,
         started_at=view.started_at,
-        deleted_at=view.deleted_at,
+        expires_at=view.expires_at,
         remaining_time=view.remaining_time,
     )
 
@@ -138,13 +138,6 @@ def start(container_id: str) -> Response:
 def stop(container_id: str) -> Response:
     """停止指定容器。"""
     container.stop(container_id)
-    return Response(status_code=204)
-
-
-@router.post("/{container_id}/kill", status_code=204, responses=_responses("成功 (无内容)", 204, 404))
-def kill(container_id: str) -> Response:
-    """强制停止指定容器。"""
-    container.kill(container_id)
     return Response(status_code=204)
 
 

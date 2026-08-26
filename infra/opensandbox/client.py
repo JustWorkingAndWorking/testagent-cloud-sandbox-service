@@ -136,13 +136,6 @@ class OpenSandboxClient:
         except SandboxNotFoundError:
             pass
 
-    def kill(self, container_id: str) -> None:
-        """强制终止容器（v4 §11.3 Kill 幂等；容器不存在视为已终止）。"""
-        try:
-            self._run(container_id, "强制终止容器", lambda sb: sb.kill())
-        except SandboxNotFoundError:
-            pass
-
     def restart(self, container_id: str) -> None:
         """重启容器：停止并重新启动，Container ID 不变（v4 §11.3 Restart 幂等）。"""
         self.stop(container_id)

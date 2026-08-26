@@ -4,7 +4,7 @@
 - 单实例、独立于 Web / REST 请求运行；由 `run_loop` 定时编排。
 - **各类检查全部独立成可调用函数**（`expire_containers` / `purge_containers` /
   `refresh_status_cache`），未来可由 Web 页面直接调用；循环仅负责按周期编排。
-- 全部动作幂等，重复执行无副作用（v4 §13.2）。
+- 调度扫描按业务状态排除已完成记录，重复扫描无副作用（v4 §13.2）。
 - 运行状态写入进程内内存缓存（不写 SQLite），供 Web 展示（v4 §13.2/§8.3）。
 """
 
@@ -70,6 +70,7 @@ def expire_containers() -> list[str]:
                 expired.append(row.container_id)
             except Exception:  # noqa: BLE001
                 logger.exception("业务过期处理失败: %s", row.container_id)
+    logger.info("调度-业务过期检查: 扫描 %d 个活跃容器，业务删除 %d 个", len(rows), len(expired))
     return expired
 
 
@@ -87,6 +88,7 @@ def purge_containers() -> list[str]:
     """
     retention = settings.container_retention_hours
     if retention <= 0:
+        logger.info("调度-保留期检查: 未配置保留期，跳过")
         return []
     purged: list[str] = []
     now = _now()
@@ -111,6 +113,7 @@ def purge_containers() -> list[str]:
             repo.delete(row.container_id)
             _status_cache.pop(row.container_id, None)
             purged.append(row.container_id)
+    logger.info("调度-保留期检查: 物理删除 %d 个，其余未到期/已跳过", len(purged))
     return purged
 
 
@@ -129,8 +132,10 @@ def refresh_status_cache() -> None:
     for row in rows:
         active_ids.add(row.container_id)
         _status_cache[row.container_id] = _fetch_status(row.container_id)
-    for stale in [cid for cid in _status_cache if cid not in active_ids]:
-        _status_cache.pop(stale, None)
+    stale = [cid for cid in _status_cache if cid not in active_ids]
+    for cid in stale:
+        _status_cache.pop(cid, None)
+    logger.info("调度-状态刷新: 更新 %d 个容器状态，清理 %d 个失效项", len(rows), len(stale))
 
 
 def _fetch_status(container_id: str) -> ContainerStatus:
@@ -161,10 +166,11 @@ def all_cached_statuses() -> dict[str, ContainerStatus]:
 def compensate() -> list[str]:
     """进程重启后的首次补齐：扫描全部持久化记录，补齐到期的业务删除与保留期物理删除。
 
-    幂等：不重复执行已完成动作（业务删除/物理删除均天然幂等）。
+    幂等：扫描范围排除已完成动作，不重复触发业务删除/物理删除。
     """
     done = expire_containers()
     done += purge_containers()
+    logger.info("调度-补偿完成：处理 %d 项", len(done))
     return done
 
 
@@ -190,3 +196,4 @@ def run_loop(stop_event: threading.Event) -> None:
                 step()
             except Exception:  # noqa: BLE001
                 logger.exception("调度检查异常: %s", step.__name__)
+        logger.info("调度-周期执行完成 (下一轮 %ss 后)", interval)
