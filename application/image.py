@@ -125,6 +125,7 @@ def _registry_host() -> str:
     return _strip_scheme(settings.image_default_registry)
 
 
+# noinspection HttpUrlsUsage
 def _strip_scheme(value: str) -> str:
     """去除协议头与尾斜杠（用于 docker 风格镜像引用）。"""
     value = value.strip()
@@ -225,6 +226,7 @@ def _append_local_rows(rows: list[ImageRow], local: LocalImage, default_ref: Opt
 
 
 def _is_pushed(name: str, tag: str) -> bool:
+    # noinspection broad-exception
     try:
         return _registry().check_image_pushed(_default_registry(), _default_namespace(), name, tag)
     except Exception:
@@ -354,6 +356,7 @@ def delete_image(full_ref: str, also_registry: bool) -> DeleteResult:
             error_summary="镜像未关联注册表，无法同步删除 Registry",
         )
 
+    # noinspection broad-exception
     try:
         succeeded = _registry().delete_image(registry, namespace, name, tag)
         if succeeded:

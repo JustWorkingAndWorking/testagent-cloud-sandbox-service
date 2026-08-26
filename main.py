@@ -11,6 +11,7 @@ import logging
 import sys
 import threading
 
+# noinspection unused-imports
 import config  # noqa: E402  导入即校验 TA_SS_* 环境变量
 from config import settings  # noqa: E402
 from infra.db import init_db  # noqa: E402
@@ -34,7 +35,7 @@ def main() -> None:
     scheduler_thread.start()
     logger.info("调度服务已启动 (调度周期 %ss)", settings.scheduler_poll_interval_seconds)
 
-    logger.info("REST API 启动: http://127.0.0.1:%s", settings.rest_api_port)
+    logger.info("REST API 启动于: http://127.0.0.1:%s", settings.rest_api_port)
     import uvicorn
 
     from interfaces.rest.app import create_app  # noqa: PLC0415

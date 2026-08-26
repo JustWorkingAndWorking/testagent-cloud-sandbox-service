@@ -90,6 +90,7 @@ class RegistryClient:
         )
 
 
+# noinspection HttpUrlsUsage
 def _normalize_registry(registry: str) -> str:
     """补全协议（无协议默认 http）并去除尾部斜杠。"""
     value = registry.strip().rstrip("/")

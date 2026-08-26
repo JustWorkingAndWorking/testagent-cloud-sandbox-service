@@ -14,6 +14,7 @@ import logging
 from datetime import datetime
 from typing import BinaryIO, Optional
 
+# noinspection package-requirements
 import docker
 
 from infra.docker.types import LocalImage

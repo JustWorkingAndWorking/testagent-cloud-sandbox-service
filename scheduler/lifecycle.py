@@ -64,6 +64,7 @@ def expire_containers() -> list[str]:
             continue
         expires = add_hours_to_iso(row.created_at, row.expiration_hours)
         if expires is not None and datetime.fromisoformat(expires) <= now:
+            # noinspection broad-exception
             try:
                 _container.business_delete(row.container_id)
                 expired.append(row.container_id)
@@ -101,6 +102,7 @@ def purge_containers() -> list[str]:
             current = repo.get(row.container_id)
             if current is None or current.deleted_at is None:
                 continue
+            # noinspection broad-exception
             try:
                 _container._opensandbox().delete(row.container_id)
             except Exception:  # noqa: BLE001
@@ -132,6 +134,7 @@ def refresh_status_cache() -> None:
 
 
 def _fetch_status(container_id: str) -> ContainerStatus:
+    # noinspection broad-exception
     try:
         status = _container._opensandbox().get_status(container_id)
     except SandboxNotFoundError:
@@ -173,14 +176,16 @@ def run_loop(stop_event: threading.Event) -> None:
 
     周期：`TA_SS_SCHEDULER_POLL_INTERVAL_SECONDS`（v4 §13.1）。
     """
+    # noinspection broad-exception
     try:
         compensate()
     except Exception:  # noqa: BLE001
-        logger.exception("初启补偿失败")
+        logger.exception("启动后初次调度失败")
     interval = settings.scheduler_poll_interval_seconds
     steps = (expire_containers, purge_containers, refresh_status_cache)
     while not stop_event.wait(interval):
         for step in steps:
+            # noinspection broad-exception
             try:
                 step()
             except Exception:  # noqa: BLE001

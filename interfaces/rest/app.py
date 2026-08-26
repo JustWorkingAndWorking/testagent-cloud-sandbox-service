@@ -68,6 +68,7 @@ def create_app() -> FastAPI:
 
     @app.exception_handler(Exception)
     async def _internal_error_handler(request: Request, exc: Exception) -> JSONResponse:
+        _ = exc
         logger.exception("REST 内部错误: %s %s", request.method, request.url.path)
         return JSONResponse(
             status_code=500,
@@ -97,6 +98,7 @@ def _authorized(request: Request) -> bool:
     header = request.headers.get("Authorization", "")
     if not header.startswith("Basic "):
         return False
+    # noinspection broad-exception
     try:
         decoded = base64.b64decode(header[6:]).decode("utf-8")
         username, _, password = decoded.partition(":")
