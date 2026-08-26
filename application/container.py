@@ -73,7 +73,7 @@ class CreateContainerParams:
     gitee_user: Optional[str] = None
     gitee_repository: Optional[str] = None
     gitee_branch: Optional[str] = None
-    authorize_general_account: bool = True
+    authorize_general_account: Optional[bool] = None
     expiration_hours: Optional[int] = None
     #: CPU 核数，无单位，例如 0.5 / 1
     cpu: Optional[float] = None
@@ -98,14 +98,12 @@ class ContainerStatusView:
     endpoint: Optional[str] = None
     started_at: Optional[str] = None
     expires_at: Optional[str] = None
-    remaining_time: Optional[int] = None
 
 
 @dataclass(frozen=True)
 class ExpirationView:
     container_id: str
-    expiration_hours: int
-    expiration: Optional[str]
+    expires_at: Optional[str]
 
 
 # ---------------------------------------------------------------------------
@@ -165,7 +163,7 @@ def create_container(params: CreateContainerParams) -> CreatedContainer:
             "TESTAGENT_CLOUD_GITEE_REPOSITORY": params.gitee_repository or "",
             "TESTAGENT_CLOUD_GITEE_BRANCH": params.gitee_branch or "",
             "TESTAGENT_CLOUD_AUTHORIZE_GENERAL_ACCOUNT": (
-                "true" if params.authorize_general_account else "false"
+                "true" if params.authorize_general_account is True else "false"
             ),
         }
         container_name = uuid.uuid4().hex[:12]
@@ -193,7 +191,7 @@ def create_container(params: CreateContainerParams) -> CreatedContainer:
                     image=image,
                     created_at=created_at,
                     expiration_hours=expiration_hours,
-                    authorize_general_account=params.authorize_general_account,
+                    authorize_general_account=params.authorize_general_account is True,
                 )
             )
 
@@ -201,7 +199,7 @@ def create_container(params: CreateContainerParams) -> CreatedContainer:
             container_id=container_id,
             image=image,
             expiration_hours=expiration_hours,
-            authorize_general_account=bool(params.authorize_general_account),
+            authorize_general_account=params.authorize_general_account is True,
             created_at=created_at,
             status=ContainerStatus.PENDING,
         )
@@ -277,7 +275,7 @@ def _check_creation_limits(repo: ContainerRepository, user_id: str, gitee_reposi
 # 状态查询与剩余时间（T6.7）
 # ---------------------------------------------------------------------------
 def get_status(container_id: str) -> ContainerStatusView:
-    """实时查询 OpenSandbox 获取 status/endpoint/started_at；remaining_time 由业务数据计算。"""
+    """实时查询 OpenSandbox 获取 status/endpoint/started_at 与预计过期时间。"""
     row = _require_active_record(container_id)
     try:
         status: SandboxStatus = get_opensandbox_client().get_status(container_id)
@@ -301,19 +299,7 @@ def get_status(container_id: str) -> ContainerStatusView:
         endpoint=endpoint,
         started_at=status.transitioned_at,
         expires_at=add_hours_to_iso(row.created_at, row.expiration_hours),
-        remaining_time=_remaining_seconds(row.created_at, row.expiration_hours),
     )
-
-
-def _remaining_seconds(created_at: str, expiration_hours: int) -> Optional[int]:
-    """剩余秒数；`expiration_hours == 0`（永不过期）返回 None；已过期返回 0。"""
-    if expiration_hours <= 0:
-        return None
-    expires = add_hours_to_iso(created_at, expiration_hours)
-    if expires is None:
-        return None
-    seconds = int((datetime.fromisoformat(expires) - _now()).total_seconds())
-    return max(seconds, 0)
 
 
 # ---------------------------------------------------------------------------
@@ -425,7 +411,7 @@ def set_expiration(container_id: str, expiration_hours: int) -> ExpirationView:
             raise ContainerNotFoundError("容器不存在")
         repo.update_expiration(container_id, expiration_hours)
         expiration = add_hours_to_iso(row.created_at, expiration_hours)
-    return ExpirationView(container_id=container_id, expiration_hours=expiration_hours, expiration=expiration)
+    return ExpirationView(container_id=container_id, expires_at=expiration)
 
 
 # ---------------------------------------------------------------------------

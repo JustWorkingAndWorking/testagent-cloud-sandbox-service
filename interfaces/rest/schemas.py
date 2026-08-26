@@ -1,7 +1,7 @@
 """
 REST API 请求 / 响应模型（v4 §14.4~§14.9）。
 
-`POST /containers` 请求包含**必填**字段 `authorize_general_account`（bool），并支持可选的
+`POST /containers` 请求包含可选字段 `authorize_general_account`（bool，省略时不授权），并支持可选的
 Gitee 信息与 CPU / 内存资源限制。
 """
 
@@ -54,7 +54,10 @@ class CreateContainerRequest(BaseModel):
     expiration_hours: Optional[int] = Field(
         default=settings.container_default_expiration_hours,
     )
-    authorize_general_account: bool = Field(description="是否授权通用码云账户")
+    authorize_general_account: Optional[bool] = Field(
+        default=None,
+        description="是否授权通用码云账户",
+    )
     cpu: Optional[float] = Field(
         default=None,
         gt=0,
@@ -85,7 +88,6 @@ class ContainerStatusResponse(BaseModel):
     endpoint: Optional[str] = None
     started_at: Optional[str] = None
     expires_at: Optional[str] = None
-    remaining_time: Optional[int] = None
 
 
 class ContainerIdsResponse(BaseModel):
@@ -110,8 +112,7 @@ class ExpirationResponse(BaseModel):
     """设置容器运行时长响应。"""
 
     container_id: str
-    expiration_hours: int
-    expiration: Optional[str]
+    expires_at: Optional[str]
 
 
 class ErrorResponse(BaseModel):

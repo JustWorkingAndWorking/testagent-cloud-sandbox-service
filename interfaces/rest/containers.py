@@ -123,7 +123,6 @@ def get_container_status(container_id: str) -> ContainerStatusResponse:
         endpoint=view.endpoint,
         started_at=view.started_at,
         expires_at=view.expires_at,
-        remaining_time=view.remaining_time,
     )
 
 
@@ -159,8 +158,7 @@ def set_expiration(container_id: str, request: ExpirationRequest) -> ExpirationR
     view = container.set_expiration(container_id, request.expiration_hours)
     return ExpirationResponse(
         container_id=view.container_id,
-        expiration_hours=view.expiration_hours,
-        expiration=view.expiration,
+        expires_at=view.expires_at,
     )
 
 
