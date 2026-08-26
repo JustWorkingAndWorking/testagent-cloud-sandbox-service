@@ -100,16 +100,20 @@ _registry_client: Optional[RegistryClient] = None
 
 def _docker() -> DockerClient:
     global _docker_client
-    if _docker_client is None:
-        _docker_client = DockerClient()
-    return _docker_client
+    client = _docker_client
+    if client is None:
+        client = DockerClient()
+        _docker_client = client
+    return client
 
 
 def _registry() -> RegistryClient:
     global _registry_client
-    if _registry_client is None:
-        _registry_client = RegistryClient()
-    return _registry_client
+    client = _registry_client
+    if client is None:
+        client = RegistryClient()
+        _registry_client = client
+    return client
 
 
 def _default_registry() -> str:

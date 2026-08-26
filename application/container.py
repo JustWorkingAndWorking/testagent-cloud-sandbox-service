@@ -48,6 +48,7 @@ __all__ = [
     "ExpirationView",
     "get_status",
     "create_container",
+    "get_opensandbox_client",
     "start",
     "stop",
     "kill",
@@ -109,13 +110,16 @@ class ExpirationView:
 _opensandbox_client: Optional[OpenSandboxClient] = None
 
 
-def _opensandbox() -> OpenSandboxClient:
+def get_opensandbox_client() -> OpenSandboxClient:
+    """获取（惰性创建的）OpenSandbox 客户端；供业务与 Scheduler 复用，测试可注入替身。"""
     global _opensandbox_client
-    if _opensandbox_client is None:
+    client = _opensandbox_client
+    if client is None:
         from infra.opensandbox.client import OpenSandboxClient
 
-        _opensandbox_client = OpenSandboxClient()
-    return _opensandbox_client
+        client = OpenSandboxClient()
+        _opensandbox_client = client
+    return client
 
 
 def _now() -> datetime:
@@ -162,7 +166,7 @@ def create_container(params: CreateContainerParams) -> CreatedContainer:
         }
         container_name = uuid.uuid4().hex[:12]
         try:
-            created: CreatedSandbox = _opensandbox().create(
+            created: CreatedSandbox = get_opensandbox_client().create(
                 image,
                 name=container_name,
                 env=env,
@@ -251,7 +255,7 @@ def get_status(container_id: str) -> ContainerStatusView:
     """实时查询 OpenSandbox 获取 status/endpoint/started_at；remaining_time 由业务数据计算。"""
     row = _require_active_record(container_id)
     try:
-        status: SandboxStatus = _opensandbox().get_status(container_id)
+        status: SandboxStatus = get_opensandbox_client().get_status(container_id)
     except SandboxNotFoundError:
         status = SandboxStatus(state="TERMINATED")
     except Exception as exc:
@@ -261,7 +265,7 @@ def get_status(container_id: str) -> ContainerStatusView:
     endpoint: Optional[str] = None
     # noinspection broad-exception
     try:
-        ep: SandboxEndpoint = _opensandbox().get_endpoint(container_id, Constants.CONTAINER_SSH_PORT.value)
+        ep: SandboxEndpoint = get_opensandbox_client().get_endpoint(container_id, Constants.CONTAINER_SSH_PORT.value)
         endpoint = ep.endpoint
     except Exception:  # noqa: BLE001 端点获取失败不影响状态返回
         logger.exception("获取容器端点失败: %s", container_id)
@@ -294,7 +298,7 @@ def start(container_id: str) -> None:
     """启动容器；已运行重复调用幂等成功（v4 §11.3）。"""
     _require_active_record(container_id)
     try:
-        _opensandbox().start(container_id)
+        get_opensandbox_client().start(container_id)
     except Exception as exc:
         raise ExternalDependencyError("启动容器失败") from exc
 
@@ -303,7 +307,7 @@ def stop(container_id: str) -> None:
     """正常停止；已停止重复调用幂等成功（v4 §11.3）。"""
     _require_active_record(container_id)
     try:
-        _opensandbox().stop(container_id)
+        get_opensandbox_client().stop(container_id)
     except Exception as exc:
         raise ExternalDependencyError("停止容器失败") from exc
 
@@ -312,7 +316,7 @@ def kill(container_id: str) -> None:
     """强制终止，最终状态 stopped；已停止重复调用幂等成功（v4 §11.3）。"""
     _require_active_record(container_id)
     try:
-        _opensandbox().kill(container_id)
+        get_opensandbox_client().kill(container_id)
     except Exception as exc:
         raise ExternalDependencyError("强制终止容器失败") from exc
 
@@ -321,7 +325,7 @@ def restart(container_id: str) -> None:
     """停止并重新启动；Container ID 不变（v4 §11.3）。"""
     _require_active_record(container_id)
     try:
-        _opensandbox().restart(container_id)
+        get_opensandbox_client().restart(container_id)
     except Exception as exc:
         raise ExternalDependencyError("重启容器失败") from exc
 
@@ -342,7 +346,7 @@ def business_delete(container_id: str) -> None:
         if row.deleted_at is not None:
             raise ContainerNotFoundError("容器不存在")
         try:
-            _opensandbox().stop(container_id)
+            get_opensandbox_client().stop(container_id)
         except Exception as exc:
             raise ExternalDependencyError("停止容器失败") from exc
         repo.business_delete(container_id, _now_iso())
@@ -366,7 +370,7 @@ def restore(container_id: str, expiration_hours: int) -> ContainerStatusView:
         if row.deleted_at is None:
             raise BusinessConflictError("容器未处于业务已删除状态，无法恢复")
         try:
-            _opensandbox().start(container_id)
+            get_opensandbox_client().start(container_id)
         except Exception as exc:
             raise ExternalDependencyError("启动容器失败") from exc
         repo.business_restore(container_id, _now_iso(), expiration_hours)
@@ -384,7 +388,7 @@ def permanent_delete(container_id: str) -> None:
         if repo.get(container_id) is None:
             raise ContainerNotFoundError("容器不存在")
     try:
-        _opensandbox().delete(container_id)
+        get_opensandbox_client().delete(container_id)
     except Exception as exc:
         raise ExternalDependencyError("删除容器失败") from exc
     with session_scope() as session:

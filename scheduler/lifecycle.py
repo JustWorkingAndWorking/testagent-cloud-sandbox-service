@@ -104,7 +104,7 @@ def purge_containers() -> list[str]:
                 continue
             # noinspection broad-exception
             try:
-                _container._opensandbox().delete(row.container_id)
+                _container.get_opensandbox_client().delete(row.container_id)
             except Exception:  # noqa: BLE001
                 logger.exception("保留期物理删除失败（外部删除）: %s", row.container_id)
                 continue
@@ -136,7 +136,7 @@ def refresh_status_cache() -> None:
 def _fetch_status(container_id: str) -> ContainerStatus:
     # noinspection broad-exception
     try:
-        status = _container._opensandbox().get_status(container_id)
+        status = _container.get_opensandbox_client().get_status(container_id)
     except SandboxNotFoundError:
         return ContainerStatus.STOPPED  # 与状态查询（T6.7）语义一致
     except Exception:  # noqa: BLE001
