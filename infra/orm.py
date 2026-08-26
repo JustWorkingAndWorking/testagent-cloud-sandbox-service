@@ -1,5 +1,5 @@
 """
-表定义（v4 §6.2）：`containers`、`settings`、`whitelist_users`。
+表定义（v4 §6.2）：`containers`、`settings`、`whitelist_users`、`admin_users`。
 
 注：`containers` 表不设唯一约束；模式/数量限制在应用层（application）校验，
 以便白名单用户跳过约束（变更 #3，见 TODO §3）。
@@ -17,6 +17,7 @@ __all__ = [
     "Container",
     "SettingsRow",
     "WhitelistUserRow",
+    "AdminUserRow",
 ]
 
 
@@ -57,4 +58,13 @@ class WhitelistUserRow(Base):
 
     __tablename__ = "whitelist_users"
 
+    user_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+
+
+class AdminUserRow(Base):
+    """`admin_users` 管理员清单表（变更 #13）。"""
+
+    __tablename__ = "admin_users"
+
+    #: 管理员用户 ID；管理员清单不参与鉴权或其他业务逻辑
     user_id: Mapped[str] = mapped_column(String(128), primary_key=True)

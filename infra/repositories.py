@@ -19,12 +19,13 @@ from typing import Optional
 from sqlalchemy import ColumnElement, func, select
 from sqlalchemy.orm import Session
 
-from infra.orm import Container, SettingsRow, WhitelistUserRow
+from infra.orm import AdminUserRow, Container, SettingsRow, WhitelistUserRow
 
 __all__ = [
     "ContainerRepository",
     "SettingsRepository",
     "WhitelistUserRepository",
+    "AdminUserRepository",
 ]
 
 
@@ -174,3 +175,40 @@ class WhitelistUserRepository:
 
     def list_all(self) -> list[WhitelistUserRow]:
         return list(self._session.scalars(select(WhitelistUserRow)))
+
+
+class AdminUserRepository:
+    """`admin_users` 管理员清单表数据访问。"""
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def add(self, user_id: str) -> bool:
+        """新增管理员用户；已存在（含本事务内待提交）返回 False。"""
+        if self._pending_contains(user_id):
+            return False
+        if self.exists(user_id):
+            return False
+        self._session.add(AdminUserRow(user_id=user_id))
+        return True
+
+    def get(self, user_id: str) -> Optional[AdminUserRow]:
+        return self._session.get(AdminUserRow, user_id)
+
+    def exists(self, user_id: str) -> bool:
+        return self._pending_contains(user_id) or self.get(user_id) is not None
+
+    def _pending_contains(self, user_id: str) -> bool:
+        for row in self._session.new:
+            if isinstance(row, AdminUserRow) and row.user_id == user_id:
+                return True
+        return False
+
+    def delete(self, user_id: str) -> None:
+        """删除管理员用户；不存在则无操作。"""
+        row = self.get(user_id)
+        if row is not None:
+            self._session.delete(row)
+
+    def list_all(self) -> list[AdminUserRow]:
+        return list(self._session.scalars(select(AdminUserRow)))
