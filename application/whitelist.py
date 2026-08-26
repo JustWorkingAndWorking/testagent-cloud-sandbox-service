@@ -2,14 +2,14 @@
 白名单用户管理应用层（v4 §12）。
 
 - 数据保存于 `whitelist_users` 表，仅业务字段 `user_id`；管理 API 通过本模块复用这些能力。
-- 创建容器时白名单用户跳过一切创建约束（模式限制、数量限制，v4 §11.2）。
+- `is_whitelisted` 同时识别 `admin_users` 中的用户；管理员用户不复制到白名单表，但同样跳过创建约束。
 """
 
 from __future__ import annotations
 
 from domain.errors import InvalidArgumentError
 from infra.db import session_scope
-from infra.repositories import WhitelistUserRepository
+from infra.repositories import AdminUserRepository, WhitelistUserRepository
 
 __all__ = [
     "add_user",
@@ -40,9 +40,12 @@ def list_users() -> list[str]:
 
 
 def is_whitelisted(user_id: str) -> bool:
-    """判断用户是否在白名单中。"""
+    """判断用户是否属于有效白名单（显式白名单或管理员清单）。"""
     with session_scope() as session:
-        return WhitelistUserRepository(session).exists(user_id)
+        return (
+            WhitelistUserRepository(session).exists(user_id)
+            or AdminUserRepository(session).exists(user_id)
+        )
 
 
 def _validate(user_id: str) -> None:
