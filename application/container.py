@@ -228,16 +228,16 @@ def _check_creation_limits(repo: ContainerRepository, user_id: str, gitee_reposi
     mode = settings.container_create_limit_mode
     if mode == "user":
         if repo.count_active(user_id=user_id) >= 1:
-            raise LimitReachedError("该用户已存在容器（user 模式限制）")
+            raise LimitReachedError("当前不允许同一用户创建多个容器")
     elif mode == "repository":
         if repo.count_active(user_id=user_id, gitee_repository=gitee_repository) >= 1:
-            raise LimitReachedError("该用户+仓库已存在容器（repository 模式限制）")
+            raise LimitReachedError("当前不允许同一用户为单个仓库创建多个容器")
     else:
         raise BusinessConflictError(f"不支持的创建限制模式: {mode}")
 
     limit = _cfg_count_limit()
     if repo.count_active() >= limit:
-        raise LimitReachedError("容器数量已达到上限")
+        raise LimitReachedError("可用容器数量已达到上限")
 
 
 # ---------------------------------------------------------------------------
