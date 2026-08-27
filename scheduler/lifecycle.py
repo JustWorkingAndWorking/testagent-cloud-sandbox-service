@@ -87,8 +87,8 @@ def purge_containers() -> list[str]:
       并在同一事务内执行外部删除与记录删除，借助 SQLite 写锁与管理 API 恢复互斥，避免竞争。
     - 返回本次物理删除的容器 ID 列表。
     """
-    retention = settings.container_retention_hours
-    if retention <= 0:
+    retention_hours = settings.container_retention_hours
+    if retention_hours <= 0:
         return []
     purged: list[str] = []
     now = _now()
@@ -97,7 +97,7 @@ def purge_containers() -> list[str]:
         for row in repo.list_all():
             if row.deleted_at is None:
                 continue
-            deadline = datetime.fromisoformat(row.deleted_at) + timedelta(hours=retention)
+            deadline = datetime.fromisoformat(row.deleted_at) + timedelta(hours=retention_hours)
             if deadline > now:
                 continue
             # 二次核对：管理 API 恢复（清 deleted_at）或已删除时跳过

@@ -182,6 +182,7 @@ def create_container(params: CreateContainerParams) -> CreatedContainer:
        及 `TESTAGENT_CLOUD_AUTHORIZE_GENERAL_ACCOUNT`（true/false）；CPU / 内存可选覆盖默认资源限制。
     """
     image = _resolve_image(params)
+    # 未指定时长时，使用创建后自动业务删除的默认有效时长。
     expiration_hours = params.expiration_hours if params.expiration_hours is not None \
         else settings.container_default_expiration_hours
     if expiration_hours < 0:

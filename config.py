@@ -74,10 +74,10 @@ class Settings:
     opensandbox_api_key: Optional[str]
     #: 容器创建限制模式：user / repository
     container_create_limit_mode: ContainerCreateLimitMode
-    #: 业务保留时长（小时）
-    container_retention_hours: int
-    #: 业务删除时长默认值（小时，7 天）
+    #: 容器创建后的默认有效时长（小时）；到期后由 Scheduler 自动业务删除
     container_default_expiration_hours: int
+    #: 业务删除后的保留时长（小时）；到期后由 Scheduler 自动物理删除
+    container_retention_hours: int
     #: 容器数量限制默认值（settings 表未设置时使用）
     container_default_count_limit: int
     #: Registry 地址默认值
@@ -156,9 +156,9 @@ settings: Settings = Settings(
     opensandbox_url=_string("OPENSANDBOX_URL"),
     opensandbox_api_key=_string_or_none("OPENSANDBOX_API_KEY"),
     container_create_limit_mode=_create_limit_mode,
-    container_retention_hours=_int("CONTAINER_RETENTION_HOURS", default=24, minimum=0),
+    container_retention_hours=_int("CONTAINER_RETENTION_HOURS", default=24 * 7, minimum=0),
     container_default_expiration_hours=_int(
-        "CONTAINER_DEFAULT_EXPIRATION_HOURS", default=24 * 7, minimum=0
+        "CONTAINER_DEFAULT_EXPIRATION_HOURS", default=24, minimum=0
     ),
     container_default_count_limit=_int("CONTAINER_DEFAULT_COUNT_LIMIT", minimum=0),
     image_default_registry=_string("IMAGE_DEFAULT_REGISTRY"),
