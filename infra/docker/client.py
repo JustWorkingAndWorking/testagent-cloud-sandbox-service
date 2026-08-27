@@ -55,7 +55,7 @@ class DockerClient:
         tags: list[str] = []
         for image in images:
             tags.extend(image.tags or [])
-        return tags
+        return list(dict.fromkeys(tags))
 
     def list_images(self) -> list[LocalImage]:
         """列出本地 Docker 镜像（Images 页面的数据来源）。"""

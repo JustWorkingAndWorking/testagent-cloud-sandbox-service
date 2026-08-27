@@ -21,7 +21,6 @@ __all__ = [
     "ErrorResponse",
     "ImageReferenceRequest",
     "ImageDeleteRequest",
-    "ImageUploadResponse",
     "ImageListItem",
     "ImageListResponse",
     "DefaultImageResponse",
@@ -47,14 +46,7 @@ class ImageReferenceRequest(BaseModel):
 class ImageDeleteRequest(ImageReferenceRequest):
     """删除镜像请求"""
 
-    also_registry: bool = Field(default=False, description="是否同步删除注册表中的镜像")
-
-
-class ImageUploadResponse(BaseModel):
-    """镜像上传结果"""
-
-    full_names: list[str] = Field(description="本地可用的镜像列表")
-    pushed_full_names: list[str] = Field(description="本次已推送的镜像列表")
+    also_registry: bool = Field(default=True, description="是否同步删除注册表中的镜像")
 
 
 class ImageListItem(BaseModel):
@@ -122,7 +114,11 @@ class AdminCreateContainerRequest(ContainerCreateRequestBase):
         }
     )
 
-    image: str = Field(min_length=1, description="完整镜像名称")
+    image: Optional[str] = Field(
+        default=None,
+        min_length=1,
+        description="完整镜像名称，省略时将使用默认镜像",
+    )
     expiration_hours: Optional[int] = Field(
         default=settings.container_default_expiration_hours,
         ge=0,

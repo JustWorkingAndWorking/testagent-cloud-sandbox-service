@@ -13,15 +13,14 @@ from typing import BinaryIO, Optional, cast
 from fastapi import APIRouter, File, Form, Response, UploadFile
 
 from application import image as image_service
+from config import Constants, settings
 from domain.errors import ExternalDependencyError
-from config import Constants
 from interfaces.admin.schemas import (
     DefaultImageResponse,
     ImageDeleteRequest,
     ImageListItem,
     ImageListResponse,
     ImageReferenceRequest,
-    ImageUploadResponse,
 )
 from interfaces.common import api_responses
 
@@ -36,29 +35,34 @@ router = APIRouter(prefix="/admin/images", tags=["管理员 API (镜像操作)"]
 # 镜像接口顺序：上传、推送、获取清单、删除、设置默认、删除默认、获取默认
 @router.post(
     "/upload",
-    response_model=ImageUploadResponse,
-    status_code=200,
-    responses=api_responses("成功", 200, 400, 502),
+    status_code=204,
+    responses=api_responses("成功 (无内容)", 204, 400, 502),
 )
 def upload_image(
-    file: UploadFile = File(...),
-    registry: Optional[str] = Form(default=None),
-    namespace: Optional[str] = Form(default=None),
-    auto_push: bool = Form(default=False),
-) -> ImageUploadResponse:
+    file: UploadFile = File(..., description="镜像归档文件，仅支持 .tar 或 .tar.gz"),
+    registry: Optional[str] = Form(
+        default=settings.image_default_registry,
+        description="注册表地址 (可选)",
+    ),
+    namespace: Optional[str] = Form(
+        default=settings.image_default_namespace,
+        description="命名空间 (可选)",
+    ),
+    auto_push: bool = Form(
+        default=True,
+        description="上传后是否自动推送到注册表 (可选)",
+    ),
+) -> Response:
     """上传镜像文件。"""
     temp_path = _save_upload(file)
     try:
-        result = image_service.upload_image(
+        image_service.upload_image(
             temp_path,
             registry=registry,
             namespace=namespace,
             auto_push=auto_push,
         )
-        return ImageUploadResponse(
-            full_names=result.full_names,
-            pushed_full_names=result.pushed_refs,
-        )
+        return Response(status_code=204)
     finally:
         # 应用层负责正常流程清理，这里覆盖保存后调用失败等边界。
         try:
@@ -103,14 +107,13 @@ def delete_image(request: ImageDeleteRequest) -> Response:
 
 @router.post(
     "/default",
-    response_model=DefaultImageResponse,
-    status_code=200,
-    responses=api_responses("成功", 200, 400, 409, 502),
+    status_code=204,
+    responses=api_responses("成功 (无内容)", 204, 400, 409, 502),
 )
-def set_default_image(request: ImageReferenceRequest) -> DefaultImageResponse:
+def set_default_image(request: ImageReferenceRequest) -> Response:
     """设置默认镜像。"""
-    full_name = image_service.set_default_image(request.full_name)
-    return DefaultImageResponse(full_name=full_name)
+    image_service.set_default_image(request.full_name)
+    return Response(status_code=204)
 
 
 @router.post(

@@ -36,7 +36,11 @@ router = APIRouter(prefix="/admin/containers", tags=["管理员 API (容器操�
 )
 def create_container(request: AdminCreateContainerRequest) -> AdminContainerResponse:
     """创建并启动容器，包含供管理员使用的完整字段。"""
-    full_name = image_service.normalize_full_name(request.image)
+    full_name = (
+        image_service.normalize_full_name(request.image)
+        if request.image is not None
+        else None
+    )
     created = container_service.create_container(
         container_service.CreateContainerParams(
             user_id=request.user_id,

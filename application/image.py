@@ -272,15 +272,24 @@ def list_images() -> list[ImageRow]:
 
     default_ref = _cfg_get_default_image()
     rows: list[ImageRow] = []
+    seen_full_names: set[str] = set()
     for local in local_images:
-        _append_local_rows(rows, local, default_ref)
+        _append_local_rows(rows, local, default_ref, seen_full_names)
     return rows
 
 
-def _append_local_rows(rows: list[ImageRow], local: LocalImage, default_ref: Optional[str]) -> None:
+def _append_local_rows(
+    rows: list[ImageRow],
+    local: LocalImage,
+    default_ref: Optional[str],
+    seen_full_names: set[str],
+) -> None:
     for repo_tag in local.tags:
         registry, namespace, name, tag = _parse_ref(repo_tag)
         full_name = _canonical_reference(repo_tag)
+        if full_name in seen_full_names:
+            continue
+        seen_full_names.add(full_name)
         pushed = _is_pushed(full_name)
         is_default = _same_reference(full_name, default_ref)
         state = ImageState.DEFAULT if is_default else (ImageState.PUSHED if pushed else ImageState.NOT_PUSHED)
@@ -319,7 +328,7 @@ def upload_image(
     file_path: str,
     registry: Optional[str] = None,
     namespace: Optional[str] = None,
-    auto_push: bool = False,
+    auto_push: bool = True,
 ) -> UploadResult:
     """镜像上传（v4 §10.2）：校验扩展名 → docker load → 重打目标 tag →（可选）推送 → 删除临时文件。
 
@@ -347,14 +356,26 @@ def upload_image(
             raise InvalidArgumentError("镜像注册表不能为空")
         if not target_namespace:
             raise InvalidArgumentError("镜像命名空间不能为空")
-        target_refs: list[str] = []
+        target_sources: dict[str, list[str]] = {}
         for repo_tag in loaded_tags:
             _, _, name, tag = _parse_ref(repo_tag)
             target = f"{host}/{target_namespace}/{name}:{tag}"
-            _docker().tag_image(repo_tag, target)
-            if repo_tag != target:
-                _docker().remove_image(repo_tag)
-            target_refs.append(target)
+            sources = target_sources.setdefault(target, [])
+            if repo_tag not in sources:
+                sources.append(repo_tag)
+
+        target_refs = list(target_sources)
+        for target, sources in target_sources.items():
+            # 当目标标签已存在时，优先用新导入的原始标签覆盖它，避免继续引用旧镜像。
+            source_ref = next(
+                (ref for ref in sources if _canonical_reference(ref) != target),
+                target,
+            )
+            if source_ref != target:
+                _docker().tag_image(source_ref, target)
+            for source in sources:
+                if source != target:
+                    _docker().remove_image(source)
 
         pushed_refs: list[str] = []
         if auto_push:
@@ -426,7 +447,7 @@ def unset_default_image() -> None:
 # ---------------------------------------------------------------------------
 # 删除（本地 + 可选 Registry）
 # ---------------------------------------------------------------------------
-def delete_image(full_ref: str, also_registry: bool) -> DeleteResult:
+def delete_image(full_ref: str, also_registry: bool = True) -> DeleteResult:
     """镜像删除（v4 §10.6）：本地 rmi + 可选 Registry 同步删除，非事务。
 
     - 本地成功而 Registry 失败：保持本地删除结果并提示（`registry_failed=True`），不回滚。
