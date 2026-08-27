@@ -255,9 +255,13 @@ def upload_image(
     - 忽略镜像原 Registry/Namespace，以弹窗输入的 registry/namespace 构建目标引用。
     - 目标 tag 保留在本地 Docker，原始 tag 在重打成功后移除；自动推送关闭时也可后续单独 Push。
     """
-    suffix = Path(file_path).suffix.lower()
+    file_name = Path(file_path).name.lower()
     try:
-        if suffix not in Constants.UPLOAD_ALLOWED_EXTENSIONS.value:
+        if not any(
+            file_name.endswith(extension)
+            for extension in Constants.UPLOAD_ALLOWED_EXTENSIONS.value
+        ):
+            suffix = Path(file_path).suffix.lower()
             raise InvalidArgumentError(f"不支持的镜像文件类型: {suffix or '(无扩展名)'}")
 
         with open(file_path, "rb") as stream:
