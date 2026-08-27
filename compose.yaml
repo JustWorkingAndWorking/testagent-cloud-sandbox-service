@@ -1,0 +1,43 @@
+services:
+  testagent-cloud-sandbox-service:
+    image: testagent/testagent-cloud-sandbox-service:latest
+
+    build:
+      context: .
+      dockerfile: Dockerfile
+
+    environment:
+      TA_SS_OPENSANDBOX_URL: ${TA_SS_OPENSANDBOX_URL:?TA_SS_OPENSANDBOX_URL is required}
+      TA_SS_OPENSANDBOX_API_KEY: ${TA_SS_OPENSANDBOX_API_KEY:-}
+
+      TA_SS_IMAGE_DEFAULT_REGISTRY: ${TA_SS_IMAGE_DEFAULT_REGISTRY:?TA_SS_IMAGE_DEFAULT_REGISTRY is required}
+      TA_SS_IMAGE_DEFAULT_NAMESPACE: ${TA_SS_IMAGE_DEFAULT_NAMESPACE:-testagent}
+
+      TA_SS_CONTAINER_CREATE_LIMIT_MODE: ${TA_SS_CONTAINER_CREATE_LIMIT_MODE:-user}
+      TA_SS_CONTAINER_DEFAULT_EXPIRATION_HOURS: ${TA_SS_CONTAINER_DEFAULT_EXPIRATION_HOURS:-24}
+      TA_SS_CONTAINER_RETENTION_HOURS: ${TA_SS_CONTAINER_RETENTION_HOURS:-168}
+      TA_SS_CONTAINER_DEFAULT_COUNT_LIMIT: ${TA_SS_CONTAINER_DEFAULT_COUNT_LIMIT:-0}
+
+      TA_SS_REST_API_PORT: ${TA_SS_REST_API_PORT:-8080}
+      TA_SS_REST_API_USERNAME: ${TA_SS_REST_API_USERNAME:?TA_SS_REST_API_USERNAME is required}
+      TA_SS_REST_API_PASSWORD: ${TA_SS_REST_API_PASSWORD:?TA_SS_REST_API_PASSWORD is required}
+
+      TA_SS_SCHEDULER_POLL_INTERVAL_SECONDS: ${TA_SS_SCHEDULER_POLL_INTERVAL_SECONDS:-5}
+
+      TA_SS_LOG_LEVEL: ${TA_SS_LOG_LEVEL:-INFO}
+
+    ports:
+      - "8080:${TA_SS_REST_API_PORT:-8080}"
+
+    volumes:
+      - ./data:/app/data
+#     - ./temp:/app/temp
+      - /var/run/docker.sock:/var/run/docker.sock
+
+    restart: unless-stopped
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "100m"
+        max-file: "10"
