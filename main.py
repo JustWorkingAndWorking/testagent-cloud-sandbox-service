@@ -40,12 +40,17 @@ def main() -> None:
 
     from interfaces.app import create_app  # noqa: PLC0415
 
-    uvicorn.run(
-        create_app(),
-        host="0.0.0.0",
-        port=settings.rest_api_port,
-        log_level=settings.log_level.lower(),
-    )
+    try:
+        uvicorn.run(
+            create_app(),
+            host="0.0.0.0",
+            port=settings.rest_api_port,
+            log_level=settings.log_level.lower(),
+        )
+    finally:
+        stop_event.set()
+        scheduler_thread.join(timeout=max(1, settings.scheduler_poll_interval_seconds + 1))
+        logger.info("调度服务已停止")
 
 
 if __name__ == "__main__":
