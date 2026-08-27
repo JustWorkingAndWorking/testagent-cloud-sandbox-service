@@ -56,20 +56,31 @@ def expire_containers() -> list[str]:
     - 返回本次处理的容器 ID 列表。
     """
     expired: list[str] = []
+
+    # 只收集候选 ID；每个候选在生命周期锁内用新事务重新读取。
     with session_scope() as session:
-        rows = list(ContainerRepository(session).list_active())
-    now = _now()
-    for row in rows:
-        if row.expiration_hours <= 0:
-            continue
-        expires = add_hours_to_iso(row.created_at, row.expiration_hours)
-        if expires is not None and datetime.fromisoformat(expires) <= now:
+        candidate_ids = [
+            row.container_id for row in ContainerRepository(session).list_active()
+        ]
+
+    for container_id in candidate_ids:
+        with _container.lifecycle_guard():
+            with session_scope() as session:
+                # 新 Session 避免使用首轮扫描的 expiration_hours/created_at 快照。
+                current = ContainerRepository(session).get(container_id)
+                if current is None or current.deleted_at is not None:
+                    continue
+                if current.expiration_hours <= 0:
+                    continue
+                expires = add_hours_to_iso(current.created_at, current.expiration_hours)
+                if expires is None or datetime.fromisoformat(expires) > _now():
+                    continue
             # noinspection broad-exception
             try:
-                _container.business_delete(row.container_id)
-                expired.append(row.container_id)
+                _container.business_delete(container_id)
+                expired.append(container_id)
             except Exception:  # noqa: BLE001
-                logger.exception("业务过期处理失败: %s", row.container_id)
+                logger.exception("业务过期处理失败: %s", container_id)
     if expired:
         logger.info("业务过期检查: 业务删除 %d 个", len(expired))
     return expired

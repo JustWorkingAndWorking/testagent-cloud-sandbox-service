@@ -454,13 +454,14 @@ def set_expiration(container_id: str, expiration_hours: int) -> ExpirationView:
     """仅修改 `expiration_hours`，不重置 `created_at`；0 表示永不过期（v4 §14.8）。"""
     if expiration_hours < 0:
         raise InvalidArgumentError("expiration_hours 不能为负数")
-    with session_scope() as session:
-        repo = ContainerRepository(session)
-        row = repo.get(container_id)
-        if row is None or row.deleted_at is not None:
-            raise ContainerNotFoundError("容器不存在")
-        repo.update_expiration(container_id, expiration_hours)
-        expiration = add_hours_to_iso(row.created_at, expiration_hours)
+    with lifecycle_guard():
+        with session_scope() as session:
+            repo = ContainerRepository(session)
+            row = repo.get(container_id)
+            if row is None or row.deleted_at is not None:
+                raise ContainerNotFoundError("容器不存在")
+            repo.update_expiration(container_id, expiration_hours)
+            expiration = add_hours_to_iso(row.created_at, expiration_hours)
     return ExpirationView(container_id=container_id, expires_at=expiration)
 
 
