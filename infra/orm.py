@@ -2,7 +2,7 @@
 表定义（v4 §6.2）：`containers`、`settings`、`whitelist_users`、`admin_users`。
 
 注：`containers` 表不设唯一约束；模式/数量限制在应用层（application）校验，
-以便白名单用户跳过约束（变更 #3，见 TODO §3）。
+以便白名单用户跳过约束（变更 #3）。
 """
 
 from __future__ import annotations
