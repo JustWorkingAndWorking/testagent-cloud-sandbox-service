@@ -422,6 +422,13 @@ def restore(container_id: str, expiration_hours: int) -> ContainerStatusView:
             if row.deleted_at is None:
                 raise BusinessConflictError("容器未处于业务删除状态，无法恢复")
             try:
+                # OpenSandbox 的普通 start 对不存在容器按幂等成功处理；恢复必须先严格确认远端记录仍存在。
+                get_opensandbox_client().get_status(container_id)
+            except SandboxNotFoundError as exc:
+                raise ContainerNotFoundError("后端容器不存在，无法恢复") from exc
+            except Exception as exc:
+                raise ExternalDependencyError("检查容器状态失败") from exc
+            try:
                 get_opensandbox_client().start(container_id)
             except Exception as exc:
                 raise ExternalDependencyError("启动容器失败") from exc
