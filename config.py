@@ -110,16 +110,33 @@ def _string_or_none(name: str) -> Optional[str]:
     return value if value else None
 
 
-def _int(name: str, default: Optional[int] = None) -> int:
+def _int(
+    name: str,
+    default: Optional[int] = None,
+    *,
+    minimum: Optional[int] = None,
+    maximum: Optional[int] = None,
+) -> int:
     raw = os.environ.get(_ENV_PREFIX + name)
     if raw is None or raw == "":
         if default is None:
             raise ConfigError(f"缺少必填环境变量 {_ENV_PREFIX + name}")
-        return default
-    try:
-        return int(raw)
-    except ValueError:
-        raise ConfigError(f"环境变量 {_ENV_PREFIX + name} 无法解析为整数: {raw!r}")
+        value = default
+    else:
+        try:
+            value = int(raw)
+        except ValueError:
+            raise ConfigError(f"环境变量 {_ENV_PREFIX + name} 无法解析为整数: {raw!r}")
+
+    if minimum is not None and value < minimum:
+        raise ConfigError(
+            f"环境变量 {_ENV_PREFIX + name} 必须大于等于 {minimum}: {value}"
+        )
+    if maximum is not None and value > maximum:
+        raise ConfigError(
+            f"环境变量 {_ENV_PREFIX + name} 必须小于等于 {maximum}: {value}"
+        )
+    return value
 
 
 _create_limit_mode = cast(ContainerCreateLimitMode, _string("CONTAINER_CREATE_LIMIT_MODE"))
@@ -139,15 +156,17 @@ settings: Settings = Settings(
     opensandbox_url=_string("OPENSANDBOX_URL"),
     opensandbox_api_key=_string_or_none("OPENSANDBOX_API_KEY"),
     container_create_limit_mode=_create_limit_mode,
-    container_retention_hours=_int("CONTAINER_RETENTION_HOURS", default=24),
-    container_default_expiration_hours=_int("CONTAINER_DEFAULT_EXPIRATION_HOURS", default=24 * 7),
-    container_default_count_limit=_int("CONTAINER_DEFAULT_COUNT_LIMIT"),
+    container_retention_hours=_int("CONTAINER_RETENTION_HOURS", default=24, minimum=0),
+    container_default_expiration_hours=_int(
+        "CONTAINER_DEFAULT_EXPIRATION_HOURS", default=24 * 7, minimum=0
+    ),
+    container_default_count_limit=_int("CONTAINER_DEFAULT_COUNT_LIMIT", minimum=0),
     image_default_registry=_string("IMAGE_DEFAULT_REGISTRY"),
     image_default_namespace=_string("IMAGE_DEFAULT_NAMESPACE", "testagent"),
     web_username=_string("WEB_USERNAME"),
     web_password=_string("WEB_PASSWORD"),
-    scheduler_poll_interval_seconds=_int("SCHEDULER_POLL_INTERVAL_SECONDS", 5),
-    rest_api_port=_int("REST_API_PORT", 8080),
+    scheduler_poll_interval_seconds=_int("SCHEDULER_POLL_INTERVAL_SECONDS", 5, minimum=1),
+    rest_api_port=_int("REST_API_PORT", 8080, minimum=1, maximum=65535),
     log_level=_log_level,
 )
 
