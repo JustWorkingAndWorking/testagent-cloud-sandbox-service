@@ -147,14 +147,26 @@ def refresh_status_cache() -> None:
     """刷新全部活跃容器的运行状态到进程内缓存；清理已不存在容器的缓存项。
 
     状态映射（v4 §8.3）：运行 → `running`；已停止 → `stopped`；创建/重启期间 → `pending`；
-    不可达 → `unknown`；sandbox 已消失 → `stopped`。
+    不可达 → `unknown`；sandbox 已消失 → 删除对应数据库记录。
     """
     with session_scope() as session:
         rows = list(ContainerRepository(session).list_active())
     active_ids: set[str] = set()
     for row in rows:
+        status, missing = _fetch_status(row.container_id)
+        if missing:
+            # noinspection broad-exception
+            try:
+                _delete_missing_container(row.container_id)
+            except Exception:  # noqa: BLE001
+                logger.exception("远端容器不存在，但删除数据库记录失败: %s", row.container_id)
+                active_ids.add(row.container_id)
+                _status_cache[row.container_id] = status
+            else:
+                _status_cache.pop(row.container_id, None)
+            continue
         active_ids.add(row.container_id)
-        _status_cache[row.container_id] = _fetch_status(row.container_id)
+        _status_cache[row.container_id] = status
     stale = [cid for cid in _status_cache if cid not in active_ids]
     for cid in stale:
         _status_cache.pop(cid, None)
@@ -162,16 +174,28 @@ def refresh_status_cache() -> None:
         logger.info("状态刷新: 更新 %d 个容器状态，清理 %d 个失效项", len(rows), len(stale))
 
 
-def _fetch_status(container_id: str) -> ContainerStatus:
+def _fetch_status(container_id: str) -> tuple[ContainerStatus, bool]:
     # noinspection broad-exception
     try:
         status = _container.get_opensandbox_client().get_status(container_id)
     except SandboxNotFoundError:
-        return ContainerStatus.STOPPED  # 与状态查询（T6.7）语义一致
+        return ContainerStatus.STOPPED, True
     except Exception:  # noqa: BLE001
         logger.exception("状态刷新失败: %s", container_id)
-        return ContainerStatus.UNKNOWN
-    return map_runtime_state(status.state)
+        return ContainerStatus.UNKNOWN, False
+    return map_runtime_state(status.state), False
+
+
+def _delete_missing_container(container_id: str) -> None:
+    """删除远端已确认不存在且尚未业务删除的本地容器记录。"""
+    with _container.lifecycle_guard():
+        with session_scope() as session:
+            repo = ContainerRepository(session)
+            row = repo.get(container_id)
+            if row is None or row.deleted_at is not None:
+                return
+            repo.delete(container_id)
+    logger.info("状态刷新：远端容器不存在，已删除数据库记录: %s", container_id)
 
 
 def get_cached_status(container_id: str) -> Optional[ContainerStatus]:
