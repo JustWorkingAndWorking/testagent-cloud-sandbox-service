@@ -1,7 +1,7 @@
 """
 Docker Engine 集成层（v4 §7）。
 
-- 使用官方 `docker` SDK 封装，对外只暴露业务需要的能力（load_image / list_images / push_image / remove_image），不泄露 Engine API 细节。
+- 使用官方 `docker` SDK 封装，对外只暴露业务需要的能力（load_image / list_images / tag_image / push_image / remove_image），不泄露 Engine API 细节。
 - 连接方式按平台自动选择，无需环境变量指定（v4 §3.4、§7.1）：Linux/容器内默认
   `/var/run/docker.sock`（compose 挂载），Windows 默认 Docker Desktop 命名管道
   `npipe:////./pipe/docker_engine`；亦可显式传入 `base_url`。
@@ -77,6 +77,23 @@ class DockerClient:
                 )
             )
         return result
+
+    def tag_image(self, source_ref: str, target_ref: str) -> None:
+        """为本地镜像创建目标 RepoTag。"""
+        try:
+            repository, tag = _split_tag(target_ref)
+        except ValueError as exc:
+            raise DockerError(f"镜像引用非法: {target_ref!r}") from exc
+        try:
+            image = self._client.images.get(source_ref)
+            if not image.tag(repository, tag=tag):
+                logger.error("Docker tag 未返回成功: %s -> %s", source_ref, target_ref)
+                raise DockerError("镜像重新打标签失败")
+        except DockerError:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("Docker tag 失败: %s -> %s", source_ref, target_ref)
+            raise DockerError("镜像重新打标签失败") from exc
 
     def push_image(self, image_ref: str) -> None:
         """推送镜像至目标 Registry（本地带 tag 的完整引用）。"""

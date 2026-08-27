@@ -244,15 +244,16 @@ def _is_pushed(name: str, tag: str) -> bool:
 # ---------------------------------------------------------------------------
 def upload_image(
     file_path: str,
-    registry: str,
-    namespace: str,
+    registry: Optional[str] = None,
+    namespace: Optional[str] = None,
     auto_push: bool = False,
 ) -> UploadResult:
-    """镜像上传（v4 §10.2）：校验扩展名 → docker load →（可选）推送 → 删除临时文件。
+    """镜像上传（v4 §10.2）：校验扩展名 → docker load → 重打目标 tag →（可选）推送 → 删除临时文件。
 
     - 文件类型仅允许 `UPLOAD_ALLOWED_EXTENSIONS`。
     - 临时文件 MUST 无论成败均删除。
     - 忽略镜像原 Registry/Namespace，以弹窗输入的 registry/namespace 构建目标引用。
+    - 目标 tag 保留在本地 Docker，原始 tag 在重打成功后移除；自动推送关闭时也可后续单独 Push。
     """
     suffix = Path(file_path).suffix.lower()
     try:
@@ -262,11 +263,21 @@ def upload_image(
         with open(file_path, "rb") as stream:
             loaded_tags = _docker().load_image(stream)
 
-        host = _strip_scheme(registry) or _registry_host()
+        host = _strip_scheme(registry or "") or _registry_host()
+        target_namespace = (namespace or "").strip().strip("/") or _default_namespace()
+        target_namespace = target_namespace.strip().strip("/")
+        if not host:
+            raise InvalidArgumentError("镜像注册表不能为空")
+        if not target_namespace:
+            raise InvalidArgumentError("镜像命名空间不能为空")
         target_refs = []
         for repo_tag in loaded_tags:
             _, _, name, tag = _parse_ref(repo_tag)
-            target_refs.append(f"{host}/{namespace}/{name}:{tag}")
+            target = f"{host}/{target_namespace}/{name}:{tag}"
+            _docker().tag_image(repo_tag, target)
+            if repo_tag != target:
+                _docker().remove_image(repo_tag)
+            target_refs.append(target)
 
         pushed_refs: list[str] = []
         if auto_push:
