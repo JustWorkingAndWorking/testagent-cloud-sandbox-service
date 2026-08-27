@@ -30,6 +30,7 @@ __all__ = [
 
 #: 默认资源限额（服务端创建沙箱必需 `resourceLimits` 字段）
 _DEFAULT_RESOURCE_LIMITS: dict[str, str] = {"cpu": "1", "memory": "1Gi"}
+_STOPPED_STATES = frozenset({"PAUSED", "EXITED", "STOPPED", "TERMINATED", "DEAD"})
 
 _T = TypeVar("_T")
 
@@ -119,6 +120,14 @@ class OpenSandboxClient:
     def start(self, container_id: str) -> None:
         """启动容器（v4 §11.3 Start 幂等；容器不存在视为已满足）。"""
         try:
+            current = self.get_status(container_id)
+        except SandboxNotFoundError:
+            return
+        except OpenSandboxError:
+            current = None
+        if current is not None and current.state.strip().upper() == "RUNNING":
+            return
+        try:
             sandbox = SandboxSync.resume(
                 container_id,
                 connection_config=self._config,
@@ -126,7 +135,7 @@ class OpenSandboxClient:
             )
             sandbox.close()
         except Exception as exc:  # noqa: BLE001
-            if _is_not_found(exc):
+            if _is_not_found(exc) or _is_in_state(self, container_id, frozenset({"RUNNING"})):
                 return
             logger.exception("OpenSandbox 启动容器失败: %s", container_id)
             raise OpenSandboxError("启动容器失败") from exc
@@ -134,9 +143,22 @@ class OpenSandboxClient:
     def stop(self, container_id: str) -> None:
         """停止容器（v4 §11.3 Stop 幂等；容器不存在视为已停止）。"""
         try:
+            current = self.get_status(container_id)
+        except SandboxNotFoundError:
+            return
+        except OpenSandboxError:
+            current = None
+        if current is not None and current.state.strip().upper() in _STOPPED_STATES:
+            return
+        try:
             self._run(container_id, "停止容器", lambda sb: sb.pause())
         except SandboxNotFoundError:
             pass
+        except Exception as exc:  # noqa: BLE001
+            if _is_in_state(self, container_id, _STOPPED_STATES):
+                return
+            logger.exception("OpenSandbox 停止容器失败: %s", container_id)
+            raise OpenSandboxError("停止容器失败") from exc
 
     def restart(self, container_id: str) -> None:
         """重启容器：停止并重新启动，Container ID 不变（v4 §11.3 Restart 幂等）。"""
@@ -198,3 +220,14 @@ def _is_not_found(exc: Exception) -> bool:
     """SDK 抛错语义启发式判断「容器不存在」（跨版本稳定，见 [DOCKER::SANDBOX_NOT_FOUND]）。"""
     text = str(exc).lower()
     return "not found" in text or "sandbox_not_found" in text
+
+
+def _is_in_state(client: OpenSandboxClient, container_id: str, states: frozenset[str]) -> bool:
+    """操作失败后复核远端状态，避免把已达到目标状态的请求报为失败。"""
+    try:
+        status = client.get_status(container_id)
+    except SandboxNotFoundError:
+        return True
+    except OpenSandboxError:
+        return False
+    return status.state.strip().upper() in states
