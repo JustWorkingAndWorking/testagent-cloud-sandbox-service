@@ -152,11 +152,11 @@ class AdminContainerListResponse(BaseModel):
 class ContainerLimitRequest(BaseModel):
     """容器数量限制变更请求。"""
 
-    count_limit: int = Field(ge=0, description="可用容器数量上限，必须为非负整数")
+    container_limit: int = Field(ge=0, description="容器数量上限，必须为非负整数")
 
 
 class ContainerLimitResponse(BaseModel):
     """容器数量限制响应。"""
 
-    current_count: int = Field(description="当前活跃的容器数量")
-    count_limit: int = Field(description="当前容器数量上限")
+    container_count: int = Field(description="当前容器数目")
+    container_limit: int = Field(description="当前容器限制")

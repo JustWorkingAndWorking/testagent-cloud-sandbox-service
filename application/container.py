@@ -138,8 +138,8 @@ class AdminContainerView:
 class ContainerLimitView:
     """管理端容器数量限制视图。"""
 
-    current_count: int
-    count_limit: int
+    container_count: int
+    container_limit: int
 
 
 # ---------------------------------------------------------------------------
@@ -499,18 +499,22 @@ def get_admin_container(container_id: str) -> AdminContainerView:
 def get_container_limit() -> ContainerLimitView:
     """读取容器限制及当前未业务删除记录数。"""
     with session_scope() as session:
-        current_count = ContainerRepository(session).count_active()
+        container_count = ContainerRepository(session).count_active()
     return ContainerLimitView(
-        current_count=current_count,
-        count_limit=_cfg_count_limit(),
+        container_count=container_count,
+        container_limit=_cfg_count_limit(),
     )
 
 
-def set_container_limit(count_limit: int) -> ContainerLimitView:
+def set_container_limit(container_limit: int) -> ContainerLimitView:
     """设置容器数量限制并返回最新限制视图。"""
-    if isinstance(count_limit, bool) or not isinstance(count_limit, int) or count_limit < 0:
-        raise InvalidArgumentError("count_limit 必须为非负整数")
-    _cfg_set_count_limit(count_limit)
+    if (
+        isinstance(container_limit, bool)
+        or not isinstance(container_limit, int)
+        or container_limit < 0
+    ):
+        raise InvalidArgumentError("container_limit 必须为非负整数")
+    _cfg_set_count_limit(container_limit)
     return get_container_limit()
 
 

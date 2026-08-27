@@ -14,6 +14,7 @@ from domain.errors import (
     ExternalDependencyError,
     InvalidArgumentError,
     LimitReachedError,
+    UserNotFoundError,
 )
 from domain.models import Container, ContainerStatus, map_runtime_state
 
@@ -22,6 +23,7 @@ __all__ = [
     "InvalidArgumentError",
     "DefaultImageNotConfiguredError",
     "ContainerNotFoundError",
+    "UserNotFoundError",
     "BusinessConflictError",
     "LimitReachedError",
     "ExternalDependencyError",

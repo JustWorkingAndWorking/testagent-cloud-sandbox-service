@@ -22,8 +22,6 @@ from interfaces.user.schemas import (
     ContainerStatusResponse,
     CreateContainerRequest,
     CreateContainerResponse,
-    ExpirationRequest,
-    ExpirationResponse,
 )
 
 logger = logging.getLogger(__name__)
@@ -124,18 +122,3 @@ def delete(container_id: str) -> Response:
     """删除指定容器。"""
     container.business_delete(container_id)
     return Response(status_code=204)
-
-
-@router.post(
-    "/{container_id}/expiration",
-    response_model=ExpirationResponse,
-    openapi_extra={"requestBody": {"description": "容器过期时间 (小时)。"}},
-    responses=api_responses("成功", 200, 400, 404),
-)
-def set_expiration(container_id: str, request: ExpirationRequest) -> ExpirationResponse:
-    """设置指定容器过期时间，0 表示永不过期。"""
-    view = container.set_expiration(container_id, request.expiration_hours)
-    return ExpirationResponse(
-        container_id=view.container_id,
-        expires_at=view.expires_at,
-    )

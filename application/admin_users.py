@@ -8,7 +8,7 @@
 
 from __future__ import annotations
 
-from domain.errors import InvalidArgumentError
+from domain.errors import InvalidArgumentError, UserNotFoundError
 from infra.db import session_scope
 from infra.repositories import AdminUserRepository
 
@@ -27,10 +27,13 @@ def add_user(user_id: str) -> bool:
 
 
 def remove_user(user_id: str) -> None:
-    """删除管理员用户（幂等）。"""
+    """删除管理员用户；用户不存在时抛出 404。"""
     _validate(user_id)
     with session_scope() as session:
-        AdminUserRepository(session).delete(user_id)
+        repo = AdminUserRepository(session)
+        if not repo.exists(user_id):
+            raise UserNotFoundError("用户不存在")
+        repo.delete(user_id)
 
 
 def list_users() -> list[str]:

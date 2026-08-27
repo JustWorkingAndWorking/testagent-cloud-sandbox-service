@@ -88,7 +88,7 @@ def get_container_limit() -> ContainerLimitResponse:
 )
 def set_container_limit(request: ContainerLimitRequest) -> ContainerLimitResponse:
     """设置容器容器可用数目上限。"""
-    return _limit_response(container_service.set_container_limit(request.count_limit))
+    return _limit_response(container_service.set_container_limit(request.container_limit))
 
 
 @router.get(
@@ -202,6 +202,6 @@ def _container_response(view: container_service.AdminContainerView) -> AdminCont
 
 def _limit_response(view: container_service.ContainerLimitView) -> ContainerLimitResponse:
     return ContainerLimitResponse(
-        current_count=view.current_count,
-        count_limit=view.count_limit,
+        container_count=view.container_count,
+        container_limit=view.container_limit,
     )

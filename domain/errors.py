@@ -13,6 +13,7 @@ __all__ = [
     "InvalidArgumentError",
     "DefaultImageNotConfiguredError",
     "ContainerNotFoundError",
+    "UserNotFoundError",
     "BusinessConflictError",
     "LimitReachedError",
     "ExternalDependencyError",
@@ -60,6 +61,13 @@ class ContainerNotFoundError(AppError):
 
     http_status = 404
     code = "container_not_found"
+
+
+class UserNotFoundError(AppError):
+    """用户清单中不存在指定用户（HTTP 404）。"""
+
+    http_status = 404
+    code = "user_not_found"
 
 
 class BusinessConflictError(AppError):

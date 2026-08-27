@@ -46,7 +46,7 @@ def list_whitelist_users() -> UserIdsResponse:
 @router.post(
     "/whitelist-users/delete",
     status_code=204,
-    responses=api_responses("成功 (无内容)", 204),
+    responses=api_responses("成功 (无内容)", 204, 404),
 )
 def delete_whitelist_user(request: UserIdRequest) -> Response:
     """删除白名单用户。"""
@@ -81,7 +81,7 @@ def list_admin_users() -> UserIdsResponse:
 @router.post(
     "/admin-users/delete",
     status_code=204,
-    responses=api_responses("成功 (无内容)", 204),
+    responses=api_responses("成功 (无内容)", 204, 404),
 )
 def delete_admin_user(request: UserIdRequest) -> Response:
     """删除管理员清单用户。"""

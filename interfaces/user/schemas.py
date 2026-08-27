@@ -13,8 +13,6 @@ from interfaces.common import (
     ContainerCreateRequestBase,
     ContainerRuntimeResponse,
     ErrorResponse,
-    ExpirationRequest,
-    ExpirationResponse,
 )
 
 __all__ = [
@@ -22,8 +20,6 @@ __all__ = [
     "CreateContainerResponse",
     "ContainerStatusResponse",
     "ContainerIdsResponse",
-    "ExpirationRequest",
-    "ExpirationResponse",
     "ErrorResponse",
 ]
 
