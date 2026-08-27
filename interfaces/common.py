@@ -90,7 +90,6 @@ def api_responses(
     result: dict[int | str, dict[str, Any]] = {
         success_code: {"description": success_description},
         400: {"model": ErrorResponse, "description": "参数校验失败"},
-        422: {"model": ErrorResponse, "description": "参数校验失败"},
         500: {"model": ErrorResponse, "description": _ERROR_LABELS[500]},
     }
     for code in error_codes:

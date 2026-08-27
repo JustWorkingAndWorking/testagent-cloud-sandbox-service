@@ -220,8 +220,22 @@ def _classify(exc: Exception, summary: str) -> OpenSandboxError:
 
 def _is_not_found(exc: Exception) -> bool:
     """SDK 抛错语义启发式判断「容器不存在」（跨版本稳定，见 [DOCKER::SANDBOX_NOT_FOUND]）。"""
+    status_code = getattr(exc, "status_code", None)
+    if status_code == 404 or status_code == "404":
+        return True
+
+    error = getattr(exc, "error", None)
+    error_code = str(getattr(error, "code", "")).lower()
+    if error_code in {"not_found", "sandbox_not_found", "sandbox-not-found"}:
+        return True
+
     text = str(exc).lower()
-    return "not found" in text or "sandbox_not_found" in text
+    return (
+        "not found" in text
+        or "sandbox_not_found" in text
+        or "sandbox not found" in text
+        or "does not exist" in text
+    )
 
 
 def _to_timezone_iso(value: datetime) -> str:

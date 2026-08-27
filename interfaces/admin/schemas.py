@@ -97,6 +97,7 @@ class AdminCreateContainerRequest(ContainerCreateRequestBase):
     """管理员创建容器请求"""
 
     model_config = ConfigDict(
+        extra="forbid",
         json_schema_extra={
             "examples": [
                 {

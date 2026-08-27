@@ -12,10 +12,11 @@ from __future__ import annotations
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, Response
+from fastapi import APIRouter
 
 from application import container
 from domain.models import add_hours_to_iso
+from interfaces.container_routes import register_container_action_routes
 from interfaces.common import api_responses
 from interfaces.user.schemas import (
     ContainerIdsResponse,
@@ -83,7 +84,11 @@ def query_container_ids(
     return ContainerIdsResponse(container_ids=ids)
 
 
-@router.get("/{container_id}", response_model=ContainerStatusResponse, responses=api_responses("成功", 200, 404))
+@router.get(
+    "/{container_id}",
+    response_model=ContainerStatusResponse,
+    responses=api_responses("成功", 200, 404, 502),
+)
 def get_container_status(container_id: str) -> ContainerStatusResponse:
     """查询指定容器运行状态。"""
     view = container.get_status(container_id)
@@ -96,29 +101,4 @@ def get_container_status(container_id: str) -> ContainerStatusResponse:
     )
 
 
-@router.post("/{container_id}/start", status_code=204, responses=api_responses("成功 (无内容)", 204, 404))
-def start(container_id: str) -> Response:
-    """启动指定容器。"""
-    container.start(container_id)
-    return Response(status_code=204)
-
-
-@router.post("/{container_id}/stop", status_code=204, responses=api_responses("成功 (无内容)", 204, 404))
-def stop(container_id: str) -> Response:
-    """停止指定容器。"""
-    container.stop(container_id)
-    return Response(status_code=204)
-
-
-@router.post("/{container_id}/restart", status_code=204, responses=api_responses("成功 (无内容)", 204, 404))
-def restart(container_id: str) -> Response:
-    """重启指定容器。"""
-    container.restart(container_id)
-    return Response(status_code=204)
-
-
-@router.post("/{container_id}/delete", status_code=204, responses=api_responses("成功 (无内容)", 204, 404))
-def delete(container_id: str) -> Response:
-    """删除指定容器。"""
-    container.business_delete(container_id)
-    return Response(status_code=204)
+register_container_action_routes(router, operation_id_prefix="user")

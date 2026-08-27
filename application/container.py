@@ -55,6 +55,7 @@ __all__ = [
     "create_container",
     "get_opensandbox_client",
     "lifecycle_guard",
+    "delete_missing_container_record",
     "start",
     "stop",
     "restart",
@@ -82,6 +83,18 @@ def lifecycle_guard() -> Iterator[None]:
     """串行化业务恢复与物理清理，避免两者对同一记录产生竞态。"""
     with _lifecycle_lock:
         yield
+
+
+def delete_missing_container_record(container_id: str) -> None:
+    """删除已确认不存在的远端容器对应的本地活跃记录。"""
+    with lifecycle_guard():
+        with session_scope() as session:
+            repo = ContainerRepository(session)
+            row = repo.get(container_id)
+            if row is None or row.deleted_at is not None:
+                return
+            repo.delete(container_id)
+    logger.info("远端容器不存在，已删除数据库记录: %s", container_id)
 
 
 @dataclass(frozen=True)
@@ -229,20 +242,30 @@ def create_container(params: CreateContainerParams) -> CreatedContainer:
 
         container_id = created.container_id
         created_at = _now_iso()
-        with session_scope() as session:
-            ContainerRepository(session).add(
-                ContainerRow(
-                    container_id=container_id,
-                    user_id=params.user_id,
-                    gitee_user=params.gitee_user or "",
-                    gitee_repository=params.gitee_repository or "",
-                    gitee_branch=params.gitee_branch,
-                    image=image,
-                    created_at=created_at,
-                    expiration_hours=expiration_hours,
-                    authorize_general_account=params.authorize_general_account is True,
+        try:
+            with session_scope() as session:
+                ContainerRepository(session).add(
+                    ContainerRow(
+                        container_id=container_id,
+                        user_id=params.user_id,
+                        gitee_user=params.gitee_user or "",
+                        gitee_repository=params.gitee_repository or "",
+                        gitee_branch=params.gitee_branch,
+                        image=image,
+                        created_at=created_at,
+                        expiration_hours=expiration_hours,
+                        authorize_general_account=params.authorize_general_account is True,
+                    )
                 )
-            )
+        except Exception as exc:
+            logger.exception("容器已创建但保存数据库记录失败: %s", container_id)
+            # noinspection broad-exception
+            try:
+                # 数据库写入失败时尽力回收远端容器，避免留下孤儿资源。
+                get_opensandbox_client().delete(container_id)
+            except Exception:  # noqa: BLE001
+                logger.exception("数据库写入失败后回收远端容器失败: %s", container_id)
+            raise ExternalDependencyError("保存容器记录失败") from exc
 
         return CreatedContainer(
             container_id=container_id,
@@ -328,8 +351,9 @@ def get_status(container_id: str) -> ContainerStatusView:
     row = _require_active_record(container_id)
     try:
         status: SandboxStatus = get_opensandbox_client().get_status(container_id)
-    except SandboxNotFoundError:
-        status = SandboxStatus(state="TERMINATED")
+    except SandboxNotFoundError as exc:
+        delete_missing_container_record(container_id)
+        raise ContainerNotFoundError("后端容器不存在") from exc
     except Exception as exc:
         raise ExternalDependencyError("获取容器状态失败") from exc
 
@@ -505,7 +529,14 @@ def list_admin_containers() -> list[AdminContainerView]:
     """列出全部容器，包括业务已删除记录。"""
     with session_scope() as session:
         rows = list(ContainerRepository(session).list_all())
-    return [_to_admin_view(row) for row in rows]
+    views: list[AdminContainerView] = []
+    for row in rows:
+        try:
+            views.append(_to_admin_view(row))
+        except ContainerNotFoundError:
+            # 状态查询已同步清理远端缺失的本地活跃记录，不再返回该条目。
+            continue
+    return views
 
 
 def get_admin_container(container_id: str) -> AdminContainerView:
@@ -558,7 +589,7 @@ def _to_admin_view(row: ContainerRow) -> AdminContainerView:
         started_at: Optional[str] = None
         expires_at = add_hours_to_iso(row.created_at, row.expiration_hours)
     else:
-        runtime = get_status(row.container_id)
+        runtime = _get_admin_runtime(row.container_id)
         status = runtime.status
         endpoint = runtime.endpoint
         started_at = runtime.started_at
@@ -581,3 +612,25 @@ def _to_admin_view(row: ContainerRow) -> AdminContainerView:
         deleted_at=row.deleted_at,
         business_deleted=row.deleted_at is not None,
     )
+
+
+def _get_admin_runtime(container_id: str) -> ContainerStatusView:
+    """优先使用 Scheduler 快照，首次刷新前才回退到实时查询。"""
+    # 局部导入避免 application.container 与 scheduler.lifecycle 的模块循环依赖。
+    from scheduler.lifecycle import get_cached_runtime, get_cached_status
+
+    cached = get_cached_runtime(container_id)
+    if cached is not None:
+        return ContainerStatusView(
+            container_id=container_id,
+            status=cached.status,
+            endpoint=cached.endpoint,
+            started_at=cached.started_at,
+        )
+
+    # 保留旧缓存的兼容读取路径：测试或进程升级期间可能只有状态缓存。
+    cached_status = get_cached_status(container_id)
+    if cached_status is not None:
+        return ContainerStatusView(container_id=container_id, status=cached_status)
+
+    return get_status(container_id)

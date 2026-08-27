@@ -17,6 +17,7 @@ from interfaces.admin.schemas import (
     ExpirationRequest,
     ExpirationResponse,
 )
+from interfaces.container_routes import register_container_action_routes
 from interfaces.common import api_responses
 
 __all__ = [
@@ -101,48 +102,7 @@ def get_container(container_id: str) -> AdminContainerResponse:
     return _container_response(container_service.get_admin_container(container_id))
 
 
-@router.post(
-    "/{container_id}/start",
-    status_code=204,
-    responses=api_responses("成功 (无内容)", 204, 404, 502),
-)
-def start(container_id: str) -> Response:
-    """启动指定容器。"""
-    container_service.start(container_id)
-    return Response(status_code=204)
-
-
-@router.post(
-    "/{container_id}/stop",
-    status_code=204,
-    responses=api_responses("成功 (无内容)", 204, 404, 502),
-)
-def stop(container_id: str) -> Response:
-    """停止指定容器。"""
-    container_service.stop(container_id)
-    return Response(status_code=204)
-
-
-@router.post(
-    "/{container_id}/restart",
-    status_code=204,
-    responses=api_responses("成功 (无内容)", 204, 404, 502),
-)
-def restart(container_id: str) -> Response:
-    """重启指定容器。"""
-    container_service.restart(container_id)
-    return Response(status_code=204)
-
-
-@router.post(
-    "/{container_id}/delete",
-    status_code=204,
-    responses=api_responses("成功 (无内容)", 204, 404, 502),
-)
-def delete(container_id: str) -> Response:
-    """业务删除指定容器。"""
-    container_service.business_delete(container_id)
-    return Response(status_code=204)
+register_container_action_routes(router, operation_id_prefix="admin")
 
 
 @router.post(

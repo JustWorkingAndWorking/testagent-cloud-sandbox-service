@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import logging
 import threading
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Optional
 from zoneinfo import ZoneInfo
@@ -31,7 +32,9 @@ __all__ = [
     "refresh_status_cache",
     "compensate",
     "run_loop",
+    "CachedRuntimeStatus",
     "get_cached_status",
+    "get_cached_runtime",
     "all_cached_statuses",
 ]
 
@@ -39,6 +42,20 @@ _TZ = ZoneInfo(Constants.TIMEZONE.value)
 
 #: 进程内运行状态缓存：container_id -> 业务状态（v4 §13.2；管理 API 读取，不落库）
 _status_cache: dict[str, ContainerStatus] = {}
+_status_cache_lock = threading.RLock()
+
+
+@dataclass(frozen=True)
+class CachedRuntimeStatus:
+    """Scheduler 最近一次刷新到的运行时状态快照。"""
+
+    status: ContainerStatus
+    endpoint: Optional[str] = None
+    started_at: Optional[str] = None
+
+
+# 管理 API 需要的运行时附加字段也随状态刷新缓存，避免每次请求直连后端。
+_runtime_cache: dict[str, CachedRuntimeStatus] = {}
 
 
 def _now() -> datetime:
@@ -72,8 +89,12 @@ def expire_containers() -> list[str]:
                     continue
                 if current.expiration_hours <= 0:
                     continue
-                expires = add_hours_to_iso(current.created_at, current.expiration_hours)
-                if expires is None or datetime.fromisoformat(expires) > _now():
+                try:
+                    expires = add_hours_to_iso(current.created_at, current.expiration_hours)
+                    if expires is None or datetime.fromisoformat(expires) > _now():
+                        continue
+                except (TypeError, ValueError):
+                    logger.exception("业务过期时间字段非法，跳过容器: %s", container_id)
                     continue
             # noinspection broad-exception
             try:
@@ -121,9 +142,13 @@ def purge_containers() -> list[str]:
                     continue
                 if current.deleted_at is None:
                     continue
-                deadline = datetime.fromisoformat(current.deleted_at) + timedelta(
-                    hours=retention_hours
-                )
+                try:
+                    deadline = datetime.fromisoformat(current.deleted_at) + timedelta(
+                        hours=retention_hours
+                    )
+                except (TypeError, ValueError):
+                    logger.exception("保留期时间字段非法，跳过容器: %s", container_id)
+                    continue
                 if deadline > _now():
                     continue
                 # noinspection broad-exception
@@ -133,7 +158,7 @@ def purge_containers() -> list[str]:
                     logger.exception("保留期物理删除失败 (外部删除） %s", container_id)
                     continue
                 repo.delete(container_id)
-                _status_cache.pop(container_id, None)
+                _discard_cached_status(container_id)
                 purged.append(container_id)
     if purged:
         logger.info("保留期检查: 物理删除 %d 个", len(purged))
@@ -152,60 +177,107 @@ def refresh_status_cache() -> None:
     with session_scope() as session:
         rows = list(ContainerRepository(session).list_active())
     active_ids: set[str] = set()
+    updates: dict[str, CachedRuntimeStatus] = {}
     for row in rows:
-        status, missing = _fetch_status(row.container_id)
+        runtime, missing = _fetch_runtime_status(row.container_id)
         if missing:
             # noinspection broad-exception
             try:
-                _delete_missing_container(row.container_id)
+                _container.delete_missing_container_record(row.container_id)
             except Exception:  # noqa: BLE001
                 logger.exception("远端容器不存在，但删除数据库记录失败: %s", row.container_id)
-                active_ids.add(row.container_id)
-                _status_cache[row.container_id] = status
-            else:
-                _status_cache.pop(row.container_id, None)
+            # 远端缺失不是 stopped；无论本地删除是否成功，都不能把过期的 stopped
+            # 状态继续提供给管理 API。删除失败时下一轮会重新扫描并重试。
+            _discard_cached_status(row.container_id)
             continue
         active_ids.add(row.container_id)
-        _status_cache[row.container_id] = status
-    stale = [cid for cid in _status_cache if cid not in active_ids]
-    for cid in stale:
-        _status_cache.pop(cid, None)
+        if runtime is not None:
+            updates[row.container_id] = runtime
+    with _status_cache_lock:
+        _status_cache.update({cid: runtime.status for cid, runtime in updates.items()})
+        _runtime_cache.update(updates)
+        stale = [
+            cid
+            for cid in set(_status_cache) | set(_runtime_cache)
+            if cid not in active_ids
+        ]
+        for cid in stale:
+            _status_cache.pop(cid, None)
+            _runtime_cache.pop(cid, None)
     if rows or stale:
         logger.info("状态刷新: 更新 %d 个容器状态，清理 %d 个失效项", len(rows), len(stale))
 
 
 def _fetch_status(container_id: str) -> tuple[ContainerStatus, bool]:
+    """获取并映射状态；第二个返回值表示远端容器是否确认不存在。"""
+    status, missing, _ = _fetch_status_details(container_id)
+    return status, missing
+
+
+def _fetch_status_details(
+    container_id: str,
+) -> tuple[ContainerStatus, bool, Optional[str]]:
     # noinspection broad-exception
     try:
         status = _container.get_opensandbox_client().get_status(container_id)
     except SandboxNotFoundError:
-        return ContainerStatus.STOPPED, True
+        return ContainerStatus.STOPPED, True, None
     except Exception:  # noqa: BLE001
         logger.exception("状态刷新失败: %s", container_id)
-        return ContainerStatus.UNKNOWN, False
-    return map_runtime_state(status.state), False
+        return ContainerStatus.UNKNOWN, False, None
+    return map_runtime_state(status.state), False, status.transitioned_at
 
 
-def _delete_missing_container(container_id: str) -> None:
-    """删除远端已确认不存在且尚未业务删除的本地容器记录。"""
-    with _container.lifecycle_guard():
-        with session_scope() as session:
-            repo = ContainerRepository(session)
-            row = repo.get(container_id)
-            if row is None or row.deleted_at is not None:
-                return
-            repo.delete(container_id)
-    logger.info("状态刷新：远端容器不存在，已删除数据库记录: %s", container_id)
+def _fetch_runtime_status(
+    container_id: str,
+) -> tuple[Optional[CachedRuntimeStatus], bool]:
+    """获取状态及管理 API 展示所需附加字段。"""
+    status, missing, started_at = _fetch_status_details(container_id)
+    if missing:
+        return None, True
+
+    endpoint: Optional[str] = None
+    client = _container.get_opensandbox_client()
+    # noinspection broad-exception
+    try:
+        endpoint_result = client.get_endpoint(
+            container_id,
+            Constants.CONTAINER_SSH_PORT.value,
+        )
+        endpoint = endpoint_result.endpoint
+    except AttributeError:
+        # 兼容只实现状态接口的测试替身；正式客户端始终提供该方法。
+        pass
+    except SandboxNotFoundError:
+        return None, True
+    except Exception:  # noqa: BLE001 端点获取失败不影响状态缓存
+        logger.exception("状态刷新获取端点失败: %s", container_id)
+
+    return CachedRuntimeStatus(status=status, endpoint=endpoint, started_at=started_at), False
 
 
 def get_cached_status(container_id: str) -> Optional[ContainerStatus]:
     """读取进程内缓存的状态（管理 API 展示用）；无缓存返回 None。"""
-    return _status_cache.get(container_id)
+    with _status_cache_lock:
+        return _status_cache.get(container_id)
+
+
+def get_cached_runtime(container_id: str) -> Optional[CachedRuntimeStatus]:
+    """读取管理 API 使用的运行时快照；无缓存返回 None。"""
+    with _status_cache_lock:
+        return _runtime_cache.get(container_id)
 
 
 def all_cached_statuses() -> dict[str, ContainerStatus]:
     """返回全部缓存状态快照（管理 API 展示用）。"""
-    return dict(_status_cache)
+    with _status_cache_lock:
+        return dict(_status_cache)
+
+
+def _discard_cached_status(container_id: str) -> None:
+    with _status_cache_lock:
+        _status_cache.pop(container_id, None)
+        _runtime_cache.pop(container_id, None)
 
 
 # ---------------------------------------------------------------------------
