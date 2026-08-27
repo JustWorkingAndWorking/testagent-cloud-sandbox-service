@@ -1,7 +1,9 @@
 """
 Docker Engine 集成层（v4 §7）。
 
-- 使用官方 `docker` SDK 封装，对外只暴露业务需要的能力（load_image / list_images / tag_image / push_image / remove_image），不泄露 Engine API 细节。
+- 使用官方 `docker` SDK 封装，对外只暴露业务需要的能力
+（load_image / list_images / tag_image / push_image / remove_image），
+不泄露 Engine API 细节。
 - 连接方式按平台自动选择，无需环境变量指定（v4 §3.4、§7.1）：Linux/容器内默认
   `/var/run/docker.sock`（compose 挂载），Windows 默认 Docker Desktop 命名管道
   `npipe:////./pipe/docker_engine`；亦可显式传入 `base_url`。
@@ -102,7 +104,7 @@ class DockerClient:
         except ValueError as exc:
             raise DockerError(f"镜像引用非法: {image_ref!r}") from exc
         try:
-            for line in self._client.images.push(repository, tag=tag, stream=True):
+            for line in self._client.images.push(repository, tag=tag, stream=True, decode=True):
                 if isinstance(line, dict) and line.get("error"):
                     logger.error("Docker push 出错: %s", line["error"])
                     raise DockerError("镜像推送失败")
