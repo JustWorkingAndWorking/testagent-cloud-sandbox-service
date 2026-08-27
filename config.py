@@ -84,14 +84,14 @@ class Settings:
     image_default_registry: str
     #: 镜像命名空间默认值
     image_default_namespace: str
-    #: REST 文档 Basic 鉴权用户名
-    web_username: str
-    #: REST 文档 Basic 鉴权密码
-    web_password: str
     #: Scheduler 轮询周期（秒）
     scheduler_poll_interval_seconds: int
     #: REST API 监听端口（监听地址固定 0.0.0.0）
     rest_api_port: int
+    #: REST 文档 Basic 鉴权用户名
+    rest_api_username: str
+    #: REST 文档 Basic 鉴权密码
+    rest_api_password: str
     #: 日志级别：DEBUG / INFO / WARNING / ERROR
     log_level: str
 
@@ -163,8 +163,8 @@ settings: Settings = Settings(
     container_default_count_limit=_int("CONTAINER_DEFAULT_COUNT_LIMIT", minimum=0),
     image_default_registry=_string("IMAGE_DEFAULT_REGISTRY"),
     image_default_namespace=_string("IMAGE_DEFAULT_NAMESPACE", "testagent"),
-    web_username=_string("WEB_USERNAME"),
-    web_password=_string("WEB_PASSWORD"),
+    rest_api_username=_string("REST_API_USERNAME"),
+    rest_api_password=_string("REST_API_PASSWORD"),
     scheduler_poll_interval_seconds=_int("SCHEDULER_POLL_INTERVAL_SECONDS", 5, minimum=1),
     rest_api_port=_int("REST_API_PORT", 8080, minimum=1, maximum=65535),
     log_level=_log_level,
