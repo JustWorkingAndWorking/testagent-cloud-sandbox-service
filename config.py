@@ -78,7 +78,7 @@ class Settings:
     container_default_expiration_hours: int
     #: 业务删除后的保留时长（小时）；到期后由 Scheduler 自动物理删除
     container_retention_hours: int
-    #: 容器数量限制默认值（settings 表未设置时使用）
+    #: 容器数量限制默认值（settings 表未设置时使用）；0 表示取消数量限制
     container_default_count_limit: int
     #: Registry 地址默认值
     image_default_registry: str
@@ -160,7 +160,7 @@ settings: Settings = Settings(
     container_default_expiration_hours=_int(
         "CONTAINER_DEFAULT_EXPIRATION_HOURS", default=24, minimum=0
     ),
-    container_default_count_limit=_int("CONTAINER_DEFAULT_COUNT_LIMIT", minimum=0),
+    container_default_count_limit=_int("CONTAINER_DEFAULT_COUNT_LIMIT", default=0, minimum=0),
     image_default_registry=_string("IMAGE_DEFAULT_REGISTRY"),
     image_default_namespace=_string("IMAGE_DEFAULT_NAMESPACE", "testagent"),
     rest_api_username=_string("REST_API_USERNAME"),

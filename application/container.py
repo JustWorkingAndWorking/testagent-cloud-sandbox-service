@@ -316,7 +316,7 @@ def _check_creation_limits(repo: ContainerRepository, user_id: str, gitee_reposi
         raise BusinessConflictError(f"不支持的创建限制模式: {mode}")
 
     limit = _cfg_count_limit()
-    if repo.count_active() >= limit:
+    if 0 < limit <= repo.count_active():
         raise LimitReachedError("可用容器数量已达到上限")
 
 
