@@ -158,6 +158,7 @@ def create_container(params: CreateContainerParams) -> CreatedContainer:
             _check_creation_limits(repo, params.user_id, params.gitee_repository or "")
 
         env = {
+            "TESTAGENT_CLOUD_MODE": "1",  # 标记容器为云端
             "TESTAGENT_CLOUD_USER_ID": params.user_id,
             "TESTAGENT_CLOUD_GITEE_USER": params.gitee_user or "",
             "TESTAGENT_CLOUD_GITEE_REPOSITORY": params.gitee_repository or "",
