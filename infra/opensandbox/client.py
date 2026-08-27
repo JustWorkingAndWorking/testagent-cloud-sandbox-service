@@ -11,13 +11,14 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional, TypeVar
+from zoneinfo import ZoneInfo
 
 from opensandbox.config.connection_sync import ConnectionConfigSync
 from opensandbox.sync.sandbox import SandboxSync
 
-from config import settings
+from config import Constants, settings
 from infra.opensandbox.types import CreatedSandbox, SandboxEndpoint, SandboxStatus
 
 logger = logging.getLogger(__name__)
@@ -30,6 +31,7 @@ __all__ = [
 
 #: 默认资源限额（服务端创建沙箱必需 `resourceLimits` 字段）
 _DEFAULT_RESOURCE_LIMITS: dict[str, str] = {"cpu": "1", "memory": "1Gi"}
+_TIMEZONE = ZoneInfo(Constants.TIMEZONE.value)
 _STOPPED_STATES = frozenset({"PAUSED", "EXITED", "STOPPED", "TERMINATED", "DEAD"})
 
 _T = TypeVar("_T")
@@ -99,7 +101,7 @@ class OpenSandboxClient:
             reason=status.reason,
             message=status.message,
             transitioned_at=(
-                status.last_transition_at.isoformat()
+                _to_timezone_iso(status.last_transition_at)
                 if status.last_transition_at is not None
                 else None
             ),
@@ -220,6 +222,13 @@ def _is_not_found(exc: Exception) -> bool:
     """SDK 抛错语义启发式判断「容器不存在」（跨版本稳定，见 [DOCKER::SANDBOX_NOT_FOUND]）。"""
     text = str(exc).lower()
     return "not found" in text or "sandbox_not_found" in text
+
+
+def _to_timezone_iso(value: datetime) -> str:
+    """将 OpenSandbox 时间统一转换为系统配置时区的 ISO 字符串。"""
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.astimezone(_TIMEZONE).isoformat()
 
 
 def _is_in_state(client: OpenSandboxClient, container_id: str, states: frozenset[str]) -> bool:
