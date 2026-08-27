@@ -22,6 +22,7 @@ from zoneinfo import ZoneInfo
 from config import Constants, settings
 from config import get_container_count_limit as _cfg_count_limit
 from config import get_default_image as _cfg_default_image
+from config import set_container_count_limit as _cfg_set_count_limit
 from domain.errors import (
     BusinessConflictError,
     ContainerNotFoundError,
@@ -47,6 +48,8 @@ __all__ = [
     "CreatedContainer",
     "ContainerStatusView",
     "ExpirationView",
+    "AdminContainerView",
+    "ContainerLimitView",
     "get_status",
     "create_container",
     "get_opensandbox_client",
@@ -58,6 +61,10 @@ __all__ = [
     "permanent_delete",
     "set_expiration",
     "query_container_ids",
+    "list_admin_containers",
+    "get_admin_container",
+    "get_container_limit",
+    "set_container_limit",
 ]
 
 _TZ = ZoneInfo(Constants.TIMEZONE.value)
@@ -104,6 +111,35 @@ class ContainerStatusView:
 class ExpirationView:
     container_id: str
     expires_at: Optional[str]
+
+
+@dataclass(frozen=True)
+class AdminContainerView:
+    """管理端容器完整视图，合并持久化业务字段和运行时字段。"""
+
+    container_id: str
+    image: str
+    user_id: str
+    gitee_user: str
+    gitee_repository: str
+    gitee_branch: Optional[str]
+    created_at: str
+    expiration_hours: int
+    authorize_general_account: bool
+    status: ContainerStatus
+    endpoint: Optional[str]
+    started_at: Optional[str]
+    expires_at: Optional[str]
+    deleted_at: Optional[str]
+    business_deleted: bool
+
+
+@dataclass(frozen=True)
+class ContainerLimitView:
+    """管理端容器数量限制视图。"""
+
+    current_count: int
+    count_limit: int
 
 
 # ---------------------------------------------------------------------------
@@ -230,7 +266,7 @@ def _validate_required(params: CreateContainerParams) -> None:
         or not isinstance(params.memory, int)
         or params.memory <= 0
     ):
-        raise InvalidArgumentError("memory 必须为正整数（单位 Gi）")
+        raise InvalidArgumentError("memory 必须为正整数")
 
 
 def _resource_limits(params: CreateContainerParams) -> Optional[dict[str, str]]:
@@ -442,6 +478,43 @@ def query_container_ids(
 
 
 # ---------------------------------------------------------------------------
+# 管理端容器完整查询与数量限制
+# ---------------------------------------------------------------------------
+def list_admin_containers() -> list[AdminContainerView]:
+    """列出全部容器，包括业务已删除记录。"""
+    with session_scope() as session:
+        rows = list(ContainerRepository(session).list_all())
+    return [_to_admin_view(row) for row in rows]
+
+
+def get_admin_container(container_id: str) -> AdminContainerView:
+    """查询管理端容器完整信息；业务已删除记录仍可查询。"""
+    with session_scope() as session:
+        row = ContainerRepository(session).get(container_id)
+    if row is None:
+        raise ContainerNotFoundError("容器不存在")
+    return _to_admin_view(row)
+
+
+def get_container_limit() -> ContainerLimitView:
+    """读取容器限制及当前未业务删除记录数。"""
+    with session_scope() as session:
+        current_count = ContainerRepository(session).count_active()
+    return ContainerLimitView(
+        current_count=current_count,
+        count_limit=_cfg_count_limit(),
+    )
+
+
+def set_container_limit(count_limit: int) -> ContainerLimitView:
+    """设置容器数量限制并返回最新限制视图。"""
+    if isinstance(count_limit, bool) or not isinstance(count_limit, int) or count_limit < 0:
+        raise InvalidArgumentError("count_limit 必须为非负整数")
+    _cfg_set_count_limit(count_limit)
+    return get_container_limit()
+
+
+# ---------------------------------------------------------------------------
 # 内部工具
 # ---------------------------------------------------------------------------
 def _require_active_record(container_id: str) -> ContainerRow:
@@ -451,3 +524,35 @@ def _require_active_record(container_id: str) -> ContainerRow:
     if row is None or row.deleted_at is not None:
         raise ContainerNotFoundError("容器不存在")
     return row
+
+
+def _to_admin_view(row: ContainerRow) -> AdminContainerView:
+    if row.deleted_at is not None:
+        status = ContainerStatus.BUSINESS_DELETED
+        endpoint: Optional[str] = None
+        started_at: Optional[str] = None
+        expires_at = add_hours_to_iso(row.created_at, row.expiration_hours)
+    else:
+        runtime = get_status(row.container_id)
+        status = runtime.status
+        endpoint = runtime.endpoint
+        started_at = runtime.started_at
+        expires_at = runtime.expires_at
+
+    return AdminContainerView(
+        container_id=row.container_id,
+        image=row.image,
+        user_id=row.user_id,
+        gitee_user=row.gitee_user,
+        gitee_repository=row.gitee_repository,
+        gitee_branch=row.gitee_branch,
+        created_at=row.created_at,
+        expiration_hours=row.expiration_hours,
+        authorize_general_account=bool(row.authorize_general_account),
+        status=status,
+        endpoint=endpoint,
+        started_at=started_at,
+        expires_at=expires_at,
+        deleted_at=row.deleted_at,
+        business_deleted=row.deleted_at is not None,
+    )

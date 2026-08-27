@@ -36,6 +36,7 @@ __all__ = [
     "ImageRow",
     "UploadResult",
     "DeleteResult",
+    "normalize_full_name",
     "list_images",
     "upload_image",
     "push_image",
@@ -56,20 +57,50 @@ class ImageState(str, Enum):
 
 @dataclass(frozen=True)
 class ImageRow:
-    """镜像列表行（按 RepoTag 一行，v4 §10.1）。"""
+    """镜像列表行；字段顺序与管理 API 合同一致。"""
 
-    image_id: str            # Image ID（短 12 位）
-    registry: str            # Registry 主机[:端口]，无则为空
-    name: str                # 仓库路径（registry 之后；可含命名空间）
-    tag: str
-    created: Optional[datetime]
-    size: int
-    state: ImageState
-    # 操作可用性（供 UI/API 直接使用，判断逻辑收敛于此）
-    can_push: bool
-    can_set_default: bool
-    can_cancel_default: bool
-    can_delete: bool
+    id: str                    # Image ID（短 12 位）
+    full_name: str             # 本地与 Registry 共用的完整目标引用
+    registry: str              # Registry 主机[:端口]，无则为空
+    namespace: str             # Registry 之后的命名空间，可含路径
+    name: str                  # 镜像名称
+    version: str               # 镜像 tag
+    created_at: Optional[datetime]
+    size: int                  # 字节
+    status: ImageState
+
+    # 旧应用层调用的只读别名；不作为 API/Pydantic 字段暴露。
+    @property
+    def image_id(self) -> str:
+        return self.id
+
+    @property
+    def tag(self) -> str:
+        return self.version
+
+    @property
+    def created(self) -> Optional[datetime]:
+        return self.created_at
+
+    @property
+    def state(self) -> ImageState:
+        return self.status
+
+    @property
+    def can_push(self) -> bool:
+        return self.status == ImageState.NOT_PUSHED
+
+    @property
+    def can_set_default(self) -> bool:
+        return self.status == ImageState.PUSHED
+
+    @property
+    def can_cancel_default(self) -> bool:
+        return self.status == ImageState.DEFAULT
+
+    @property
+    def can_delete(self) -> bool:
+        return self.status != ImageState.DEFAULT
 
 
 @dataclass(frozen=True)
@@ -79,6 +110,11 @@ class UploadResult:
     loaded_tags: list[str]          # data 导入回传的 RepoTag
     target_refs: list[str]          # 按标准目标引用构建的引用（用于推送）
     pushed_refs: list[str]          # 已推送的引用（未勾选自动推送则为空）
+
+    @property
+    def full_names(self) -> list[str]:
+        """上传后本地保留、可供管理 API 使用的完整镜像引用。"""
+        return self.target_refs
 
 
 @dataclass(frozen=True)
@@ -183,6 +219,42 @@ def _standard_ref(name: str, tag: str) -> str:
     return f"{_registry_host()}/{_default_namespace()}/{name}:{tag}"
 
 
+def normalize_full_name(full_ref: str) -> str:
+    """规范化完整 Registry 镜像引用，返回 Docker 风格的 `registry/namespace/name:version`。"""
+    value = _strip_scheme(full_ref)
+    registry, namespace, name, tag = _parse_ref(value)
+    if not registry:
+        raise InvalidArgumentError("镜像 full_name 必须包含 Registry")
+    if not namespace:
+        raise InvalidArgumentError("镜像 full_name 必须包含 namespace")
+    if not name:
+        raise InvalidArgumentError("镜像 full_name 缺少镜像名称")
+    return _compose_ref(registry, namespace, name, tag)
+
+
+def _compose_ref(registry: str, namespace: str, name: str, tag: str) -> str:
+    parts = [part for part in (registry, namespace, name) if part]
+    if not parts:
+        raise InvalidArgumentError("镜像引用不能为空")
+    return f"{'/'.join(parts)}:{tag}"
+
+
+def _canonical_reference(full_ref: str) -> str:
+    """规范化本地 RepoTag；允许无 Registry 的历史本地镜像。"""
+    value = _strip_scheme(full_ref)
+    registry, namespace, name, tag = _parse_ref(value)
+    return _compose_ref(registry, namespace, name, tag)
+
+
+def _same_reference(left: str, right: Optional[str]) -> bool:
+    if right is None:
+        return False
+    try:
+        return _canonical_reference(left) == _canonical_reference(right)
+    except InvalidArgumentError:
+        return _strip_scheme(left) == _strip_scheme(right)
+
+
 # ---------------------------------------------------------------------------
 # 列表与可用性
 # ---------------------------------------------------------------------------
@@ -190,8 +262,8 @@ def list_images() -> list[ImageRow]:
     """列出本地 Docker 镜像并计算可用性（v4 §10.1 / §10.4）。
 
     - 一行 = 一个 RepoTag；无 RepoTag 的镜像（悬空镜像）跳过。
-    - 已推送判断统一针对标准目标引用：`default_registry/default_namespace/{name}:{tag}`。
-    - 当前默认镜像按 settings `default_image`（完整引用）匹配。
+    - `full_name` 直接来自本地最终 RepoTag；上传流程会先将本地标签改为目标引用。
+    - 已推送判断、默认镜像匹配均针对每行自己的 `full_name`。
     """
     try:
         local_images = _docker().list_images()
@@ -208,31 +280,32 @@ def list_images() -> list[ImageRow]:
 def _append_local_rows(rows: list[ImageRow], local: LocalImage, default_ref: Optional[str]) -> None:
     for repo_tag in local.tags:
         registry, namespace, name, tag = _parse_ref(repo_tag)
-        standard = _standard_ref(name, tag)
-        pushed = _is_pushed(name, tag)
-        is_default = standard == default_ref
+        full_name = _canonical_reference(repo_tag)
+        pushed = _is_pushed(full_name)
+        is_default = _same_reference(full_name, default_ref)
         state = ImageState.DEFAULT if is_default else (ImageState.PUSHED if pushed else ImageState.NOT_PUSHED)
         rows.append(
             ImageRow(
-                image_id=local.id,
+                id=local.id,
+                full_name=full_name,
                 registry=registry,
+                namespace=namespace,
                 name=name,
-                tag=tag,
-                created=local.created,
+                version=tag,
+                created_at=local.created,
                 size=local.size,
-                state=state,
-                can_push=not pushed,                        # 未推送才可 Push
-                can_set_default=pushed and not is_default,  # 已推送且非默认 可设为默认
-                can_cancel_default=is_default,              # 默认镜像可取消默认
-                can_delete=not is_default,                  # 默认镜像禁止删除
+                status=state,
             )
         )
 
 
-def _is_pushed(name: str, tag: str) -> bool:
+def _is_pushed(full_name: str) -> bool:
+    registry, namespace, name, tag = _parse_ref(full_name)
+    if not registry:
+        return False
     # noinspection broad-exception
     try:
-        return _registry().check_image_pushed(_default_registry(), _default_namespace(), name, tag)
+        return _registry().check_image_pushed(registry, namespace, name, tag)
     except Exception:
         # 不可达时不在列表层面失败：按未推送处理（保持列表可用），错误已由 infra 记录
         logger.exception("已推送判断失败（Registry 不可达），按未推送处理")
@@ -274,7 +347,7 @@ def upload_image(
             raise InvalidArgumentError("镜像注册表不能为空")
         if not target_namespace:
             raise InvalidArgumentError("镜像命名空间不能为空")
-        target_refs = []
+        target_refs: list[str] = []
         for repo_tag in loaded_tags:
             _, _, name, tag = _parse_ref(repo_tag)
             target = f"{host}/{target_namespace}/{name}:{tag}"
@@ -312,9 +385,10 @@ def _remove_temp(path: str) -> None:
 # ---------------------------------------------------------------------------
 # 推送（Push）
 # ---------------------------------------------------------------------------
-def push_image(name: str, tag: str) -> str:
-    """推送镜像至标准目标引用（v4 §10.3），不做 Registry 预验证；返回目标引用。"""
-    target = _standard_ref(name, tag)
+def push_image(full_name: str, tag: Optional[str] = None) -> str:
+    """推送完整目标引用；不做 Registry 预验证并返回规范化引用。"""
+    # 保留旧应用层调用 push_image(name, tag) 的本地兼容形式；新 API 只传 full_name。
+    target = _standard_ref(full_name, tag) if tag is not None else normalize_full_name(full_name)
     try:
         _docker().push_image(target)
     except Exception as exc:
@@ -332,14 +406,14 @@ def get_default_image() -> Optional[str]:
 
 def set_default_image(full_ref: str) -> str:
     """设置默认镜像（完整引用）；仅已推送镜像可设为默认（v4 §10.5）。"""
-    registry, namespace, name, tag = _parse_ref(full_ref)
+    canonical = normalize_full_name(full_ref)
+    registry, namespace, name, tag = _parse_ref(canonical)
     try:
         pushed = _registry().check_image_pushed(registry, namespace, name, tag)
     except Exception as exc:
-        raise ExternalDependencyError("校验默认镜像已推送状态失败（Registry 不可达）") from exc
+        raise ExternalDependencyError("校验默认镜像已推送状态失败 (Registry 服务异常)") from exc
     if not pushed:
         raise BusinessConflictError("仅已推送的镜像可设为默认镜像")
-    canonical = _standard_ref(name, tag)
     _cfg_set_default_image(canonical)
     return canonical
 
@@ -358,9 +432,12 @@ def delete_image(full_ref: str, also_registry: bool) -> DeleteResult:
     - 本地成功而 Registry 失败：保持本地删除结果并提示（`registry_failed=True`），不回滚。
     - Registry 删除失败不抛错（由调用方提示）；本地失败抛 `ExternalDependencyError`。
     """
-    registry, namespace, name, tag = _parse_ref(full_ref)
+    docker_ref = _canonical_reference(full_ref)
+    if _same_reference(docker_ref, _cfg_get_default_image()):
+        raise BusinessConflictError("默认镜像不可删除")
+    registry, namespace, name, tag = _parse_ref(docker_ref)
     try:
-        _docker().remove_image(full_ref)
+        _docker().remove_image(docker_ref)
     except Exception as exc:
         raise ExternalDependencyError(f"删除本地镜像失败: {full_ref}") from exc
 
@@ -389,7 +466,7 @@ def delete_image(full_ref: str, also_registry: bool) -> DeleteResult:
             )
     except Exception:
         # 底层记录日志，这里保持本地结果并提示，不回滚
-        logger.exception("Registry 删除失败（保持本地删除结果）: %s", full_ref)
+        logger.exception("Registry 删除失败（保持本地删除结果）: %s", docker_ref)
         result = DeleteResult(
             local_deleted=True,
             registry_deleted=False,

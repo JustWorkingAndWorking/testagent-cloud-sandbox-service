@@ -19,7 +19,10 @@ from fastapi.responses import JSONResponse
 
 from config import settings
 from domain.errors import AppError
-from interfaces import containers
+from interfaces.admin.containers import router as admin_container_router
+from interfaces.admin.images import router as admin_image_router
+from interfaces.admin.users import router as admin_user_router
+from interfaces.user.containers import router as user_container_router
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +36,10 @@ _DOC_PATHS = {"/docs", "/redoc", "/openapi.json"}
 def create_app() -> FastAPI:
     """构建 FastAPI 应用（REST 业务端点 + 错误映射 + 文档登录保护）。"""
     app = FastAPI(title="TestAgent Cloud Sandbox Service", version="1.0.0")
-    app.include_router(containers.router)
+    app.include_router(user_container_router)
+    app.include_router(admin_image_router)
+    app.include_router(admin_user_router)
+    app.include_router(admin_container_router)
 
     @app.exception_handler(AppError)
     async def _app_error_handler(request: Request, exc: AppError) -> JSONResponse:
