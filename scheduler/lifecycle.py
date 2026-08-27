@@ -91,28 +91,39 @@ def purge_containers() -> list[str]:
     if retention_hours <= 0:
         return []
     purged: list[str] = []
-    now = _now()
+
+    # 只收集候选 ID；每个候选在生命周期锁内用新事务重新读取。
     with session_scope() as session:
-        repo = ContainerRepository(session)
-        for row in repo.list_all():
-            if row.deleted_at is None:
-                continue
-            deadline = datetime.fromisoformat(row.deleted_at) + timedelta(hours=retention_hours)
-            if deadline > now:
-                continue
-            # 二次核对：管理 API 恢复（清 deleted_at）或已删除时跳过
-            current = repo.get(row.container_id)
-            if current is None or current.deleted_at is None:
-                continue
-            # noinspection broad-exception
-            try:
-                _container.get_opensandbox_client().delete(row.container_id)
-            except Exception:  # noqa: BLE001
-                logger.exception("保留期物理删除失败（外部删除）: %s", row.container_id)
-                continue
-            repo.delete(row.container_id)
-            _status_cache.pop(row.container_id, None)
-            purged.append(row.container_id)
+        candidate_ids = [
+            row.container_id
+            for row in ContainerRepository(session).list_all()
+            if row.deleted_at is not None
+        ]
+
+    for container_id in candidate_ids:
+        with _container.lifecycle_guard():
+            with session_scope() as session:
+                repo = ContainerRepository(session)
+                # 新 Session 避免复用首轮扫描的 identity map 快照。
+                current = repo.get(container_id)
+                if current is None:
+                    continue
+                if current.deleted_at is None:
+                    continue
+                deadline = datetime.fromisoformat(current.deleted_at) + timedelta(
+                    hours=retention_hours
+                )
+                if deadline > _now():
+                    continue
+                # noinspection broad-exception
+                try:
+                    _container.get_opensandbox_client().delete(container_id)
+                except Exception:  # noqa: BLE001
+                    logger.exception("保留期物理删除失败 (外部删除） %s", container_id)
+                    continue
+                repo.delete(container_id)
+                _status_cache.pop(container_id, None)
+                purged.append(container_id)
     if purged:
         logger.info("保留期检查: 物理删除 %d 个", len(purged))
     return purged

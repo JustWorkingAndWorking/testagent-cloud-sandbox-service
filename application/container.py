@@ -14,9 +14,10 @@ import logging
 import math
 import threading
 import uuid
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Iterator, Optional
 from zoneinfo import ZoneInfo
 
 from config import Constants, settings
@@ -53,6 +54,7 @@ __all__ = [
     "get_status",
     "create_container",
     "get_opensandbox_client",
+    "lifecycle_guard",
     "start",
     "stop",
     "restart",
@@ -71,6 +73,15 @@ _TZ = ZoneInfo(Constants.TIMEZONE.value)
 
 #: 创建限制临界区互斥（单实例部署，配合 SQLite 单写者保证原子性，v4 §13.1/§11.2）
 _create_lock = threading.Lock()
+#: 恢复与 Scheduler 物理清理共用的生命周期临界区（单实例部署）
+_lifecycle_lock = threading.Lock()
+
+
+@contextmanager
+def lifecycle_guard() -> Iterator[None]:
+    """串行化业务恢复与物理清理，避免两者对同一记录产生竞态。"""
+    with _lifecycle_lock:
+        yield
 
 
 @dataclass(frozen=True)
@@ -402,18 +413,19 @@ def restore(container_id: str, expiration_hours: int) -> ContainerStatusView:
     """
     if expiration_hours < 0:
         raise InvalidArgumentError("expiration_hours 不能为负数")
-    with session_scope() as session:
-        repo = ContainerRepository(session)
-        row = repo.get(container_id)
-        if row is None:
-            raise ContainerNotFoundError("容器不存在")
-        if row.deleted_at is None:
-            raise BusinessConflictError("容器未处于业务已删除状态，无法恢复")
-        try:
-            get_opensandbox_client().start(container_id)
-        except Exception as exc:
-            raise ExternalDependencyError("启动容器失败") from exc
-        repo.business_restore(container_id, _now_iso(), expiration_hours)
+    with lifecycle_guard():
+        with session_scope() as session:
+            repo = ContainerRepository(session)
+            row = repo.get(container_id)
+            if row is None:
+                raise ContainerNotFoundError("容器不存在")
+            if row.deleted_at is None:
+                raise BusinessConflictError("容器未处于业务删除状态，无法恢复")
+            try:
+                get_opensandbox_client().start(container_id)
+            except Exception as exc:
+                raise ExternalDependencyError("启动容器失败") from exc
+            repo.business_restore(container_id, _now_iso(), expiration_hours)
 
     return get_status(container_id)
 
