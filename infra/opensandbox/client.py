@@ -63,7 +63,7 @@ class OpenSandboxClient:
         name: str,
         env: dict[str, str],
         metadata: Optional[dict[str, str]] = None,
-        skip_health_check: bool = False,
+        skip_health_check: bool = True,
         resource_limits: Optional[dict[str, str]] = None,
     ) -> CreatedSandbox:
         """创建并自动启动容器（v4 §11.1）；`timeout=None` 表示生命周期由本服务管理。
