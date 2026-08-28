@@ -81,6 +81,7 @@ class ContainerRepository:
         self,
         user_id: Optional[str] = None,
         gitee_repository: Optional[str] = None,
+        gitee_user: Optional[str] = None,
     ) -> int:
         """活跃记录数（`deleted_at IS NULL`，不含业务已删除）；供应用层数量/模式限制校验。"""
         conditions: list[ColumnElement[bool]] = [Container.deleted_at.is_(None)]
@@ -88,6 +89,8 @@ class ContainerRepository:
             conditions.append(Container.user_id == user_id)
         if gitee_repository is not None:
             conditions.append(Container.gitee_repository == gitee_repository)
+        if gitee_user is not None:
+            conditions.append(Container.gitee_user == gitee_user)
         stmt = select(func.count()).select_from(Container).where(*conditions)
         return int(self._session.execute(stmt).scalar_one())
 
