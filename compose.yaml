@@ -31,11 +31,13 @@ services:
 
     volumes:
       - ./data:/app/data
+#     如果需要持久化临时上传文件
 #     - ./temp:/app/temp
       - /var/run/docker.sock:/var/run/docker.sock
 
     restart: unless-stopped
 
+    # 防止存储爆炸
     logging:
       driver: json-file
       options:
