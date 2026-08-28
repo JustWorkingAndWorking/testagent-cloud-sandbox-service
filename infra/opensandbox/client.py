@@ -89,7 +89,7 @@ class OpenSandboxClient:
             sandbox.close()
             return CreatedSandbox(container_id=container_id)
         except Exception as exc:  # noqa: BLE001
-            logger.exception("OpenSandbox 创建容器失败")
+            logger.error("OpenSandbox 创建容器失败: %s: %s", type(exc).__name__, exc)
             raise OpenSandboxError("创建容器失败") from exc
 
     def get_status(self, container_id: str) -> SandboxStatus:
@@ -126,7 +126,9 @@ class OpenSandboxClient:
         except SandboxNotFoundError:
             return
         except OpenSandboxError:
-            current = None
+            # 状态查询失败通常表示 OpenSandbox 不可达；不要继续 resume，
+            # 否则一次请求会触发多次连接异常并产生重复日志。
+            raise
         if current is not None and current.state.strip().upper() == "RUNNING":
             return
         try:
@@ -139,7 +141,12 @@ class OpenSandboxClient:
         except Exception as exc:  # noqa: BLE001
             if _is_not_found(exc) or _is_in_state(self, container_id, frozenset({"RUNNING"})):
                 return
-            logger.exception("OpenSandbox 启动容器失败: %s", container_id)
+            logger.error(
+                "OpenSandbox 启动容器失败: %s: %s: %s",
+                container_id,
+                type(exc).__name__,
+                exc,
+            )
             raise OpenSandboxError("启动容器失败") from exc
 
     def stop(self, container_id: str) -> None:
@@ -149,7 +156,8 @@ class OpenSandboxClient:
         except SandboxNotFoundError:
             return
         except OpenSandboxError:
-            current = None
+            # 连接失败时直接向上层报告后端故障，不再继续 pause。
+            raise
         if current is not None and current.state.strip().upper() in _STOPPED_STATES:
             return
         try:
@@ -159,7 +167,12 @@ class OpenSandboxClient:
         except Exception as exc:  # noqa: BLE001
             if _is_in_state(self, container_id, _STOPPED_STATES):
                 return
-            logger.exception("OpenSandbox 停止容器失败: %s", container_id)
+            logger.error(
+                "OpenSandbox 停止容器失败: %s: %s: %s",
+                container_id,
+                type(exc).__name__,
+                exc,
+            )
             raise OpenSandboxError("停止容器失败") from exc
 
     def restart(self, container_id: str) -> None:
@@ -178,14 +191,24 @@ class OpenSandboxClient:
         except Exception as exc:  # noqa: BLE001
             if _is_not_found(exc):
                 return
-            logger.exception("OpenSandbox 删除容器失败: %s", container_id)
+            logger.error(
+                "OpenSandbox 删除容器失败: %s: %s: %s",
+                container_id,
+                type(exc).__name__,
+                exc,
+            )
             raise OpenSandboxError("删除容器失败") from exc
         try:
             sandbox.destroy()
         except Exception as exc:  # noqa: BLE001
             if _is_not_found(exc):
                 return
-            logger.exception("OpenSandbox 删除容器失败: %s", container_id)
+            logger.error(
+                "OpenSandbox 删除容器失败: %s: %s: %s",
+                container_id,
+                type(exc).__name__,
+                exc,
+            )
             raise OpenSandboxError("删除容器失败") from exc
 
     def _run(self, container_id: str, summary: str, op: Callable[[SandboxSync], _T]) -> _T:
@@ -200,12 +223,24 @@ class OpenSandboxClient:
                 skip_health_check=True,
             )
         except Exception as exc:  # noqa: BLE001
-            logger.exception("OpenSandbox %s 失败（连接）: %s", summary, container_id)
+            logger.error(
+                "OpenSandbox %s 失败（连接）: %s: %s: %s",
+                summary,
+                container_id,
+                type(exc).__name__,
+                exc,
+            )
             raise _classify(exc, f"{summary}失败") from exc
         try:
             return op(sandbox)
         except Exception as exc:  # noqa: BLE001
-            logger.exception("OpenSandbox %s 失败: %s", summary, container_id)
+            logger.error(
+                "OpenSandbox %s 失败: %s: %s: %s",
+                summary,
+                container_id,
+                type(exc).__name__,
+                exc,
+            )
             raise _classify(exc, f"{summary}失败") from exc
         finally:
             sandbox.close()

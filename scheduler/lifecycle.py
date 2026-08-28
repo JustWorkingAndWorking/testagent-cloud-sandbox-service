@@ -21,7 +21,7 @@ from config import Constants, settings
 from application import container as _container
 from domain.models import ContainerStatus, add_hours_to_iso, map_runtime_state
 from infra.db import session_scope
-from infra.opensandbox.client import SandboxNotFoundError
+from infra.opensandbox.client import OpenSandboxError, SandboxNotFoundError
 from infra.repositories import ContainerRepository
 
 logger = logging.getLogger(__name__)
@@ -100,8 +100,16 @@ def expire_containers() -> list[str]:
             try:
                 _container.business_delete(container_id)
                 expired.append(container_id)
-            except Exception:  # noqa: BLE001
-                logger.exception("业务过期处理失败: %s", container_id)
+            except OpenSandboxError as exc:
+                # OpenSandbox 适配层已记录底层原因；这里不再重复打印 traceback。
+                logger.error("业务过期处理失败: %s: %s", container_id, exc)
+            except Exception as exc:  # noqa: BLE001
+                logger.error(
+                    "业务过期处理失败: %s: %s: %s",
+                    container_id,
+                    type(exc).__name__,
+                    exc,
+                )
     if expired:
         logger.info("业务过期检查: 业务删除 %d 个", len(expired))
     return expired
@@ -154,8 +162,17 @@ def purge_containers() -> list[str]:
                 # noinspection broad-exception
                 try:
                     _container.get_opensandbox_client().delete(container_id)
-                except Exception:  # noqa: BLE001
-                    logger.exception("保留期物理删除失败 (外部删除） %s", container_id)
+                except OpenSandboxError as exc:
+                    # OpenSandbox 适配层已记录底层原因；这里仅保留调度上下文。
+                    logger.error("保留期物理删除失败 (外部删除） %s: %s", container_id, exc)
+                    continue
+                except Exception as exc:  # noqa: BLE001
+                    logger.error(
+                        "保留期物理删除失败 (外部删除） %s: %s: %s",
+                        container_id,
+                        type(exc).__name__,
+                        exc,
+                    )
                     continue
                 repo.delete(container_id)
                 _discard_cached_status(container_id)
@@ -172,14 +189,34 @@ def refresh_status_cache() -> None:
     """刷新全部活跃容器的运行状态到进程内缓存；清理已不存在容器的缓存项。
 
     状态映射（v4 §8.3）：运行 → `running`；已停止 → `stopped`；创建/重启期间 → `pending`；
-    不可达 → `unknown`；sandbox 已消失 → 删除对应数据库记录。
+    不可达 → `unknown`；sandbox 已消失 → 删除对应数据库记录。单个容器刷新失败不会中断本轮，
+    最终日志会单独统计失败数量。
     """
     with session_scope() as session:
         rows = list(ContainerRepository(session).list_active())
     active_ids: set[str] = set()
     updates: dict[str, CachedRuntimeStatus] = {}
+    failed_count = 0
     for row in rows:
-        runtime, missing = _fetch_runtime_status(row.container_id)
+        try:
+            runtime, missing, failed = _fetch_runtime_status(row.container_id)
+        except Exception as exc:  # noqa: BLE001
+            # 单个容器异常不得中断本轮刷新；保留 unknown 快照并统计失败数。
+            logger.error(
+                "状态刷新单容器失败: %s: %s: %s",
+                row.container_id,
+                type(exc).__name__,
+                exc,
+            )
+            runtime, missing, failed = (
+                CachedRuntimeStatus(
+                    status=ContainerStatus.UNKNOWN,
+                    endpoint=None,
+                    started_at=None,
+                ),
+                False,
+                True,
+            )
         if missing:
             # noinspection broad-exception
             try:
@@ -193,6 +230,7 @@ def refresh_status_cache() -> None:
         active_ids.add(row.container_id)
         if runtime is not None:
             updates[row.container_id] = runtime
+            failed_count += int(failed)
     with _status_cache_lock:
         _status_cache.update({cid: runtime.status for cid, runtime in updates.items()})
         _runtime_cache.update(updates)
@@ -205,36 +243,59 @@ def refresh_status_cache() -> None:
             _status_cache.pop(cid, None)
             _runtime_cache.pop(cid, None)
     if rows or stale:
-        logger.info("状态刷新: 更新 %d 个容器状态，清理 %d 个失效项", len(rows), len(stale))
+        logger.info(
+            "状态刷新: 更新 %d 个容器状态，更新失败 %d 个，清理 %d 个失效项",
+            len(updates),
+            failed_count,
+            len(stale),
+        )
 
 
 def _fetch_status(container_id: str) -> tuple[ContainerStatus, bool]:
     """获取并映射状态；第二个返回值表示远端容器是否确认不存在。"""
-    status, missing, _ = _fetch_status_details(container_id)
+    status, missing, _, _ = _fetch_status_details(container_id)
     return status, missing
 
 
 def _fetch_status_details(
     container_id: str,
-) -> tuple[ContainerStatus, bool, Optional[str]]:
+) -> tuple[ContainerStatus, bool, Optional[str], bool]:
+    """获取状态、远端缺失标记、启动时间及本次请求失败标记。"""
     # noinspection broad-exception
     try:
         status = _container.get_opensandbox_client().get_status(container_id)
     except SandboxNotFoundError:
-        return ContainerStatus.STOPPED, True, None
-    except Exception:  # noqa: BLE001
-        logger.exception("状态刷新失败: %s", container_id)
-        return ContainerStatus.UNKNOWN, False, None
-    return map_runtime_state(status.state), False, status.transitioned_at
+        return ContainerStatus.STOPPED, True, None, False
+    except OpenSandboxError as exc:
+        # 适配层已记录底层连接/请求错误，避免 Scheduler 再输出完整堆栈。
+        logger.error("状态刷新失败: %s: %s", container_id, exc)
+        return ContainerStatus.UNKNOWN, False, None, True
+    except Exception as exc:  # noqa: BLE001
+        logger.error(
+            "状态刷新失败: %s: %s: %s",
+            container_id,
+            type(exc).__name__,
+            exc,
+        )
+        return ContainerStatus.UNKNOWN, False, None, True
+    return map_runtime_state(status.state), False, status.transitioned_at, False
 
 
 def _fetch_runtime_status(
     container_id: str,
-) -> tuple[Optional[CachedRuntimeStatus], bool]:
+) -> tuple[Optional[CachedRuntimeStatus], bool, bool]:
     """获取状态及管理 API 展示所需附加字段。"""
-    status, missing, started_at = _fetch_status_details(container_id)
+    status, missing, started_at, failed = _fetch_status_details(container_id)
     if missing:
-        return None, True
+        return None, True, False
+
+    # 状态已经获取失败时不再额外请求端点，避免一次刷新产生两次连接错误。
+    if failed:
+        return (
+            CachedRuntimeStatus(status=status, endpoint=None, started_at=started_at),
+            False,
+            True,
+        )
 
     endpoint: Optional[str] = None
     client = _container.get_opensandbox_client()
@@ -249,11 +310,21 @@ def _fetch_runtime_status(
         # 兼容只实现状态接口的测试替身；正式客户端始终提供该方法。
         pass
     except SandboxNotFoundError:
-        return None, True
-    except Exception:  # noqa: BLE001 端点获取失败不影响状态缓存
-        logger.exception("状态刷新获取端点失败: %s", container_id)
+        return None, True, False
+    except OpenSandboxError as exc:
+        # 端点不是状态缓存的必要字段，但仍记录后端故障且不重复打印堆栈。
+        logger.error("状态刷新获取端点失败: %s: %s", container_id, exc)
+        failed = True
+    except Exception as exc:  # noqa: BLE001 端点获取失败不影响状态缓存
+        logger.error(
+            "状态刷新获取端点失败: %s: %s: %s",
+            container_id,
+            type(exc).__name__,
+            exc,
+        )
+        failed = True
 
-    return CachedRuntimeStatus(status=status, endpoint=endpoint, started_at=started_at), False
+    return CachedRuntimeStatus(status=status, endpoint=endpoint, started_at=started_at), False, failed
 
 
 def get_cached_status(container_id: str) -> Optional[ContainerStatus]:

@@ -9,7 +9,6 @@
 
 from __future__ import annotations
 
-import logging
 from typing import Optional
 
 from fastapi import APIRouter
@@ -24,8 +23,6 @@ from interfaces.user.schemas import (
     CreateContainerRequest,
     CreateContainerResponse,
 )
-
-logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/user/containers", tags=["用户 API"])
 
@@ -48,21 +45,13 @@ def create_container(request: CreateContainerRequest) -> CreateContainerResponse
             authorize_general_account=request.authorize_general_account,
         )
     )
-    # 创建成功后实时查询一次端点与启动时间，随响应返回；查询失败回退空值不阻断创建
-    endpoint: Optional[str] = None
-    started_at: Optional[str] = None
-    # noinspection broad-exception
-    try:
-        view = container.get_status(created.container_id)
-        endpoint = view.endpoint
-        started_at = view.started_at
-    except Exception:  # noqa: BLE001
-        logger.warning("创建后实时查询端点/启动时间失败: %s", created.container_id)
+    # 创建成功后实时查询一次端点与启动时间，查询失败按外部服务错误返回。
+    view = container.get_status(created.container_id)
     return CreateContainerResponse(
         container_id=created.container_id,
         status=created.status.value,
-        endpoint=endpoint,
-        started_at=started_at,
+        endpoint=view.endpoint,
+        started_at=view.started_at,
         expires_at=add_hours_to_iso(created.created_at, created.expiration_hours),
     )
 
