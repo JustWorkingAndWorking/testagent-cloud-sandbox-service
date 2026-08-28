@@ -238,6 +238,14 @@ def create_container(params: CreateContainerParams) -> CreatedContainer:
                 resource_limits=_resource_limits(params),
             )
         except Exception as exc:
+            if _is_image_not_found_error(exc):
+                if params.image is None:
+                    raise DefaultImageNotConfiguredError(
+                        "默认镜像不存在，请联系管理员解决"
+                    ) from exc
+                raise InvalidArgumentError(
+                    "默认镜像不存在，请先设置默认镜像后再创建容器"
+                ) from exc
             _raise_backend_service_error("创建容器", exc)
 
         container_id = created.container_id
@@ -595,6 +603,59 @@ def _raise_backend_service_error(operation: str, exc: Exception) -> NoReturn:
             exc,
         )
     raise ExternalDependencyError("后端服务错误") from exc
+
+
+def _is_image_not_found_error(exc: Exception) -> bool:
+    """判断 OpenSandbox 创建失败是否由镜像不存在导致。"""
+    markers = (
+        "image not found",
+        "image_not_found",
+        "image-not-found",
+        "镜像不存在",
+        "镜像未找到",
+        "manifest unknown",
+        "manifest_unknown",
+        "errimagepull",
+        "imagepullbackoff",
+        "no such image",
+        "pull access denied",
+        "failed to pull image",
+        "repository does not exist",
+    )
+    pending: list[BaseException] = [exc]
+    visited: set[int] = set()
+    while pending:
+        current = pending.pop()
+        if id(current) in visited:
+            continue
+        visited.add(id(current))
+
+        parts = [str(current)]
+        error = getattr(current, "error", None)
+        if error is not None:
+            parts.extend(
+                str(value)
+                for value in (
+                    getattr(error, "code", None),
+                    getattr(error, "message", None),
+                )
+                if value
+            )
+        text = " ".join(parts).lower()
+        if any(marker in text for marker in markers):
+            return True
+        if "image" in text and any(
+            marker in text for marker in ("not found", "does not exist")
+        ):
+            return True
+
+        cause = current.__cause__
+        context = current.__context__
+        if cause is not None:
+            pending.append(cause)
+        if context is not None:
+            pending.append(context)
+    return False
 
 
 def _to_admin_view(row: ContainerRow) -> AdminContainerView:
