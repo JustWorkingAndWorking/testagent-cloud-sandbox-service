@@ -94,7 +94,7 @@ def expire_containers() -> list[str]:
                     if expires is None or datetime.fromisoformat(expires) > _now():
                         continue
                 except (TypeError, ValueError):
-                    logger.exception("业务过期时间字段非法，跳过容器: %s", container_id)
+                    logger.exception("业务删除时间字段非法，跳过容器: %s", container_id)
                     continue
             # noinspection broad-exception
             try:
@@ -102,16 +102,16 @@ def expire_containers() -> list[str]:
                 expired.append(container_id)
             except OpenSandboxError as exc:
                 # OpenSandbox 适配层已记录底层原因；这里不再重复打印 traceback。
-                logger.error("业务过期处理失败: %s: %s", container_id, exc)
+                logger.error("业务删除处理失败: %s: %s", container_id, exc)
             except Exception as exc:  # noqa: BLE001
                 logger.error(
-                    "业务过期处理失败: %s: %s: %s",
+                    "业务删除处理失败: %s: %s: %s",
                     container_id,
                     type(exc).__name__,
                     exc,
                 )
     if expired:
-        logger.info("业务过期检查: 业务删除 %d 个", len(expired))
+        logger.info("业务删除检查: 业务删除 %d 个", len(expired))
     return expired
 
 
@@ -155,7 +155,7 @@ def purge_containers() -> list[str]:
                         hours=retention_hours
                     )
                 except (TypeError, ValueError):
-                    logger.exception("保留期时间字段非法，跳过容器: %s", container_id)
+                    logger.exception("物理保留时间字段非法，跳过容器: %s", container_id)
                     continue
                 if deadline > _now():
                     continue
@@ -164,11 +164,11 @@ def purge_containers() -> list[str]:
                     _container.get_opensandbox_client().delete(container_id)
                 except OpenSandboxError as exc:
                     # OpenSandbox 适配层已记录底层原因；这里仅保留调度上下文。
-                    logger.error("保留期物理删除失败 (外部删除） %s: %s", container_id, exc)
+                    logger.error("物理删除失败 (被外部服务删除) %s: %s", container_id, exc)
                     continue
                 except Exception as exc:  # noqa: BLE001
                     logger.error(
-                        "保留期物理删除失败 (外部删除） %s: %s: %s",
+                        "物理删除失败 (被外部服务删除) %s: %s: %s",
                         container_id,
                         type(exc).__name__,
                         exc,
@@ -178,7 +178,7 @@ def purge_containers() -> list[str]:
                 _discard_cached_status(container_id)
                 purged.append(container_id)
     if purged:
-        logger.info("保留期检查: 物理删除 %d 个", len(purged))
+        logger.info("物理删除检查: 物理删除 %d 个", len(purged))
     return purged
 
 
@@ -203,7 +203,7 @@ def refresh_status_cache() -> None:
         except Exception as exc:  # noqa: BLE001
             # 单个容器异常不得中断本轮刷新；保留 unknown 快照并统计失败数。
             logger.error(
-                "状态刷新单容器失败: %s: %s: %s",
+                "单容器状态刷新失败: %s: %s: %s",
                 row.container_id,
                 type(exc).__name__,
                 exc,
@@ -222,7 +222,7 @@ def refresh_status_cache() -> None:
             try:
                 _container.delete_missing_container_record(row.container_id)
             except Exception:  # noqa: BLE001
-                logger.exception("远端容器不存在，但删除数据库记录失败: %s", row.container_id)
+                logger.exception("远端容器不存在，删除数据库记录失败: %s", row.container_id)
             # 远端缺失不是 stopped；无论本地删除是否成功，都不能把过期的 stopped
             # 状态继续提供给管理 API。删除失败时下一轮会重新扫描并重试。
             _discard_cached_status(row.container_id)
