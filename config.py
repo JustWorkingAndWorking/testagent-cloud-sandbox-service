@@ -110,6 +110,15 @@ def _string_or_none(name: str) -> Optional[str]:
     return value if value else None
 
 
+def _image_registry() -> str:
+    value = _string("IMAGE_DEFAULT_REGISTRY")
+    # noinspection HttpUrlsUsage
+    for prefix in ("http://", "https://"):
+        if value.startswith(prefix):
+            return value[len(prefix):]
+    return value
+
+
 def _int(
     name: str,
     default: Optional[int] = None,
@@ -161,7 +170,7 @@ settings: Settings = Settings(
         "CONTAINER_DEFAULT_EXPIRATION_HOURS", default=24, minimum=0
     ),
     container_default_count_limit=_int("CONTAINER_DEFAULT_COUNT_LIMIT", default=0, minimum=0),
-    image_default_registry=_string("IMAGE_DEFAULT_REGISTRY"),
+    image_default_registry=_image_registry(),
     image_default_namespace=_string("IMAGE_DEFAULT_NAMESPACE", "testagent"),
     rest_api_username=_string("REST_API_USERNAME"),
     rest_api_password=_string("REST_API_PASSWORD"),
