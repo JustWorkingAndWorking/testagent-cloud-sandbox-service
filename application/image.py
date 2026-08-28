@@ -317,7 +317,7 @@ def _is_pushed(full_name: str) -> bool:
         return _registry().check_image_pushed(registry, namespace, name, tag)
     except Exception:
         # 不可达时不在列表层面失败：按未推送处理（保持列表可用），错误已由 infra 记录
-        logger.exception("已推送判断失败（Registry 不可达），按未推送处理")
+        logger.exception("已推送判断失败 (Registry 不可达)，按未推送处理")
         return False
 
 
@@ -386,6 +386,8 @@ def upload_image(
                 except Exception as exc:
                     raise ExternalDependencyError(f"镜像推送失败: {target}") from exc
     except InvalidArgumentError:
+        raise
+    except ExternalDependencyError:
         raise
     except Exception as exc:
         raise ExternalDependencyError("镜像导入到本地 Docker 失败") from exc
@@ -487,7 +489,7 @@ def delete_image(full_ref: str, also_registry: bool = True) -> DeleteResult:
             )
     except Exception:
         # 底层记录日志，这里保持本地结果并提示，不回滚
-        logger.exception("Registry 删除失败（保持本地删除结果）: %s", docker_ref)
+        logger.exception("Registry 删除失败 (保持本地删除结果): %s", docker_ref)
         result = DeleteResult(
             local_deleted=True,
             registry_deleted=False,

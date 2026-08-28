@@ -216,7 +216,12 @@ def create_container(params: CreateContainerParams) -> CreatedContainer:
     with _create_lock:
         with session_scope() as session:
             repo = ContainerRepository(session)
-            _check_creation_limits(repo, params.user_id, params.gitee_repository or "")
+            _check_creation_limits(
+                repo,
+                params.user_id,
+                params.gitee_user or "",
+                params.gitee_repository or "",
+            )
 
         env = {
             "TESTAGENT_CLOUD_MODE": "1",  # 标记容器为云端
@@ -244,7 +249,7 @@ def create_container(params: CreateContainerParams) -> CreatedContainer:
                         "默认镜像不存在，请联系管理员解决"
                     ) from exc
                 raise InvalidArgumentError(
-                    "默认镜像不存在，请先设置默认镜像后再创建容器"
+                    "镜像不存在，请检查镜像字段或者默认镜像设置后再创建容器"
                 ) from exc
             _raise_backend_service_error("创建容器", exc)
 
@@ -324,12 +329,18 @@ def _resource_limits(params: CreateContainerParams) -> Optional[dict[str, str]]:
     return limits
 
 
-def _check_creation_limits(repo: ContainerRepository, user_id: str, gitee_repository: str) -> None:
+def _check_creation_limits(
+    repo: ContainerRepository,
+    user_id: str,
+    gitee_user: str,
+    gitee_repository: str,
+) -> None:
     """创建限制（v4 §11.2）：白名单跳过；模式限制 + 数量限制。
 
     计数口径：`running`/`pending` 计入、`stopped`/`business_deleted` 不计；
     当前以「非业务删除记录」计数（业务过期会先置 deleted_at 再停容器），
-    手动停止的容器仍视作占用预留槽位。
+    手动停止的容器仍视作占用预留槽位。repository 模式按
+    `user_id + (gitee_user, gitee_repository)` 区分仓库。
     """
     from application.whitelist import is_whitelisted
 
@@ -341,7 +352,11 @@ def _check_creation_limits(repo: ContainerRepository, user_id: str, gitee_reposi
         if repo.count_active(user_id=user_id) >= 1:
             raise LimitReachedError("当前不允许同一用户创建多个容器")
     elif mode == "repository":
-        if repo.count_active(user_id=user_id, gitee_repository=gitee_repository) >= 1:
+        if repo.count_active(
+            user_id=user_id,
+            gitee_repository=gitee_repository,
+            gitee_user=gitee_user,
+        ) >= 1:
             raise LimitReachedError("当前不允许同一用户为单个仓库创建多个容器")
     else:
         raise BusinessConflictError(f"不支持的创建限制模式: {mode}")
@@ -633,14 +648,10 @@ def _is_image_not_found_error(exc: Exception) -> bool:
         parts = [str(current)]
         error = getattr(current, "error", None)
         if error is not None:
-            parts.extend(
-                str(value)
-                for value in (
-                    getattr(error, "code", None),
-                    getattr(error, "message", None),
-                )
-                if value
-            )
+            for attribute in ("code", "message"):
+                value = getattr(error, attribute, None)
+                if isinstance(value, str) and value:
+                    parts.append(value)
         text = " ".join(parts).lower()
         if any(marker in text for marker in markers):
             return True
