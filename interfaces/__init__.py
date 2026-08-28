@@ -9,7 +9,7 @@ from __future__ import annotations
 __all__ = [
     "app",
     "common",
-    "container_routes",
+    "common_container_routes",
     "user",
     "admin",
 ]

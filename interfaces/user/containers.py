@@ -15,7 +15,7 @@ from fastapi import APIRouter
 
 from application import container
 from domain.models import add_hours_to_iso
-from interfaces.container_routes import register_container_action_routes
+from interfaces.common_container_routes import register_container_action_routes
 from interfaces.common import api_responses
 from interfaces.user.schemas import (
     ContainerIdsResponse,

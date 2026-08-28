@@ -28,28 +28,28 @@ def register_container_action_routes(
         action=container_service.start,
         path="/{container_id}/start",
         operation_id=f"{operation_id_prefix}_start_container",
-        summary="启动指定容器。",
+        summary="Start Container",
     )
     _register_action(
         router,
         action=container_service.stop,
         path="/{container_id}/stop",
         operation_id=f"{operation_id_prefix}_stop_container",
-        summary="停止指定容器。",
+        summary="Stop Container",
     )
     _register_action(
         router,
         action=container_service.restart,
         path="/{container_id}/restart",
         operation_id=f"{operation_id_prefix}_restart_container",
-        summary="重启指定容器。",
+        summary="Restart Container",
     )
     _register_action(
         router,
         action=container_service.business_delete,
         path="/{container_id}/delete",
         operation_id=f"{operation_id_prefix}_delete_container",
-        summary="删除指定容器。",
+        summary="Delete Container",
     )
 
 

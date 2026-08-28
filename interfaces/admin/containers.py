@@ -17,7 +17,7 @@ from interfaces.admin.schemas import (
     ExpirationRequest,
     ExpirationResponse,
 )
-from interfaces.container_routes import register_container_action_routes
+from interfaces.common_container_routes import register_container_action_routes
 from interfaces.common import api_responses
 
 __all__ = [
