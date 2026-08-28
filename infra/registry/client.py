@@ -11,6 +11,8 @@ Registry HTTP API V2 集成层（v4 §7.4）。
 from __future__ import annotations
 
 import logging
+import os
+from urllib.parse import urlsplit, urlunsplit
 
 import requests
 
@@ -28,6 +30,9 @@ _MANIFEST_ACCEPT = (
     "application/vnd.oci.image.manifest.v1+json, "
     "application/vnd.oci.image.index.v1+json"
 )
+
+_CONTAINER_HOST_ALIAS = "host.docker.internal"
+_LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
 
 
 class RegistryError(Exception):
@@ -92,8 +97,23 @@ class RegistryClient:
 
 # noinspection HttpUrlsUsage
 def _normalize_registry(registry: str) -> str:
-    """补全协议（无协议默认 http）并去除尾部斜杠。"""
+    """补全协议并解析容器内的本机 Registry 地址。"""
     value = registry.strip().rstrip("/")
     if value and not value.startswith(("http://", "https://")):
         value = f"http://{value}"
+    if os.path.exists("/.dockerenv"):
+        parsed = urlsplit(value)
+        hostname = (parsed.hostname or "").lower()
+        if hostname in _LOOPBACK_HOSTS:
+            parsed_port = parsed.port
+            port = f":{parsed_port}" if parsed_port is not None else ""
+            value = urlunsplit(
+                (
+                    parsed.scheme,
+                    f"{_CONTAINER_HOST_ALIAS}{port}",
+                    parsed.path,
+                    parsed.query,
+                    parsed.fragment,
+                )
+            )
     return value
