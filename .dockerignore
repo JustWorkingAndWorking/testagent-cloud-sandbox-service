@@ -129,7 +129,7 @@ coverage.xml
 *.py,cover
 .hypothesis/
 .pytest_cache/
-cover/
+#cover/
 
 # Translations
 *.mo
@@ -248,3 +248,10 @@ tests/
 
 data/
 temp/
+
+.env.example
+.git/
+.dockerignore
+.gitignore
+compose.yaml
+Dockerfile
