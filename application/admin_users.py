@@ -2,8 +2,8 @@
 管理员清单管理应用层（变更 #13）。
 
 - 数据保存于 `admin_users` 表，仅业务字段 `user_id`。
-- 本模块只提供清单 CRUD，不负责 API 鉴权；管理员用户的有效白名单语义由
-  `application.whitelist.is_whitelisted` 统一判断。
+- 本模块提供清单 CRUD 和管理员身份查询，不负责 API 鉴权；管理员用户的有效白名单语义
+  由 `application.whitelist.is_whitelisted` 统一判断。
 """
 
 from __future__ import annotations
@@ -16,6 +16,7 @@ __all__ = [
     "add_user",
     "remove_user",
     "list_users",
+    "is_admin",
 ]
 
 
@@ -40,6 +41,13 @@ def list_users() -> list[str]:
     """列出全部管理员用户 ID。"""
     with session_scope() as session:
         return [row.user_id for row in AdminUserRepository(session).list_all()]
+
+
+def is_admin(user_id: str) -> bool:
+    """判断用户是否在管理员清单中。"""
+    _validate(user_id)
+    with session_scope() as session:
+        return AdminUserRepository(session).exists(user_id)
 
 
 def _validate(user_id: str) -> None:

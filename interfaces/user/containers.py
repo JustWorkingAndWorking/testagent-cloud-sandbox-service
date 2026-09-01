@@ -87,6 +87,8 @@ def get_container_status(container_id: str) -> ContainerStatusResponse:
         endpoint=view.endpoint,
         started_at=view.started_at,
         expires_at=view.expires_at,
+        gitee_user=view.gitee_user,
+        gitee_repository=view.gitee_repository,
     )
 
 

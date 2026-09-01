@@ -129,6 +129,8 @@ class ContainerStatusView:
     endpoint: Optional[str] = None
     started_at: Optional[str] = None
     expires_at: Optional[str] = None
+    gitee_user: str = ""
+    gitee_repository: str = ""
 
 
 @dataclass(frozen=True)
@@ -398,6 +400,8 @@ def get_status(container_id: str) -> ContainerStatusView:
         endpoint=endpoint,
         started_at=status.transitioned_at,
         expires_at=add_hours_to_iso(row.created_at, row.expiration_hours),
+        gitee_user=row.gitee_user,
+        gitee_repository=row.gitee_repository,
     )
 
 
