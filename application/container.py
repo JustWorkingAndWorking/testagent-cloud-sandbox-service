@@ -104,6 +104,7 @@ class CreateContainerParams:
     gitee_user: Optional[str] = None
     gitee_repository: Optional[str] = None
     gitee_branch: Optional[str] = None
+    gitee_url: Optional[str] = ""
     authorize_general_account: Optional[bool] = None
     expiration_hours: Optional[int] = None
     #: CPU 核数，无单位，例如 0.5 / 1
@@ -131,6 +132,7 @@ class ContainerStatusView:
     expires_at: Optional[str] = None
     gitee_user: str = ""
     gitee_repository: str = ""
+    gitee_url: str = ""
 
 
 @dataclass(frozen=True)
@@ -149,6 +151,7 @@ class AdminContainerView:
     gitee_user: str
     gitee_repository: str
     gitee_branch: Optional[str]
+    gitee_url: str
     created_at: str
     expiration_hours: int
     authorize_general_account: bool
@@ -203,34 +206,38 @@ def create_container(params: CreateContainerParams) -> CreatedContainer:
     - 镜像：`params.image` 为空则使用默认镜像；默认镜像未配置抛 400 语义错误。
     - 创建限制（模式 / 数量）在此校验，白名单用户跳过全部；并发通过进程互斥 + SQLite 单写者保证。
     - 容器名：随机字符串（仅表示容器本身，不承载业务信息）；端口固定 22；
-      环境变量注入 `TESTAGENT_CLOUD_USER_ID` / `TESTAGENT_CLOUD_GITEE_USER` /
-       `TESTAGENT_CLOUD_GITEE_REPOSITORY` / `TESTAGENT_CLOUD_GITEE_BRANCH`（为空也注入空值）
+      环境变量注入 `TESTAGENT_CLOUD_USER_ID` / `TESTAGENT_CLOUD_GITEE_URL` /
+       `TESTAGENT_CLOUD_GITEE_USER` / `TESTAGENT_CLOUD_GITEE_REPOSITORY` /
+       `TESTAGENT_CLOUD_GITEE_BRANCH`（为空也注入空值）
        及 `TESTAGENT_CLOUD_AUTHORIZE_GENERAL_ACCOUNT`（true/false）；CPU / 内存可选覆盖默认资源限制。
     """
+    _validate_required(params)
+    gitee_url = _normalise_optional_gitee_value(params.gitee_url)
+    gitee_user = _normalise_optional_gitee_value(params.gitee_user)
+    gitee_repository = _normalise_optional_gitee_value(params.gitee_repository)
     image = _resolve_image(params)
     # 未指定时长时，使用创建后自动业务删除的默认有效时长。
     expiration_hours = params.expiration_hours if params.expiration_hours is not None \
         else settings.container_default_expiration_hours
     if expiration_hours < 0:
         raise InvalidArgumentError("expiration_hours 不能为负数")
-    _validate_required(params)
-
     with _create_lock:
         with session_scope() as session:
             repo = ContainerRepository(session)
             _check_creation_limits(
                 repo,
                 params.user_id,
-                params.gitee_user or "",
-                params.gitee_repository or "",
+                gitee_user,
+                gitee_repository,
             )
 
         env = {
             "TESTAGENT_CLOUD_MODE": "1",  # 标记容器为云端
             "TESTAGENT_CLOUD_USER_ID": params.user_id,
-            "TESTAGENT_CLOUD_GITEE_USER": params.gitee_user or "",
-            "TESTAGENT_CLOUD_GITEE_REPOSITORY": params.gitee_repository or "",
+            "TESTAGENT_CLOUD_GITEE_USER": gitee_user,
+            "TESTAGENT_CLOUD_GITEE_REPOSITORY": gitee_repository,
             "TESTAGENT_CLOUD_GITEE_BRANCH": params.gitee_branch or "",
+            "TESTAGENT_CLOUD_GITEE_URL": gitee_url,
             "TESTAGENT_CLOUD_AUTHORIZE_GENERAL_ACCOUNT": (
                 "true" if params.authorize_general_account is True else "false"
             ),
@@ -263,8 +270,9 @@ def create_container(params: CreateContainerParams) -> CreatedContainer:
                     ContainerRow(
                         container_id=container_id,
                         user_id=params.user_id,
-                        gitee_user=params.gitee_user or "",
-                        gitee_repository=params.gitee_repository or "",
+                        gitee_url=gitee_url,
+                        gitee_user=gitee_user,
+                        gitee_repository=gitee_repository,
                         gitee_branch=params.gitee_branch,
                         image=image,
                         created_at=created_at,
@@ -304,6 +312,15 @@ def _resolve_image(params: CreateContainerParams) -> str:
 def _validate_required(params: CreateContainerParams) -> None:
     if not params.user_id or not params.user_id.strip():
         raise InvalidArgumentError("user_id 不能为空")
+    gitee_values = (
+        _normalise_optional_gitee_value(params.gitee_url),
+        _normalise_optional_gitee_value(params.gitee_user),
+        _normalise_optional_gitee_value(params.gitee_repository),
+    )
+    if any(gitee_values) and not all(gitee_values):
+        raise InvalidArgumentError(
+            "gitee_url、gitee_user、gitee_repository 必须同时填写或同时为空"
+        )
     if params.cpu is not None and (
         isinstance(params.cpu, bool)
         or not isinstance(params.cpu, (int, float))
@@ -317,6 +334,17 @@ def _validate_required(params: CreateContainerParams) -> None:
         or params.memory <= 0
     ):
         raise InvalidArgumentError("memory 必须为正整数")
+
+
+def _normalise_optional_gitee_value(value: Optional[str]) -> str:
+    """将未填写或仅含空白的 Gitee 字段统一为空字符串。"""
+    if value is None:
+        return ""
+    if not isinstance(value, str):
+        raise InvalidArgumentError("Gitee 字段必须为字符串")
+    if not value.strip():
+        return ""
+    return value
 
 
 def _resource_limits(params: CreateContainerParams) -> Optional[dict[str, str]]:
@@ -400,6 +428,7 @@ def get_status(container_id: str) -> ContainerStatusView:
         endpoint=endpoint,
         started_at=status.transitioned_at,
         expires_at=add_hours_to_iso(row.created_at, row.expiration_hours),
+        gitee_url=row.gitee_url,
         gitee_user=row.gitee_user,
         gitee_repository=row.gitee_repository,
     )
@@ -690,6 +719,7 @@ def _to_admin_view(row: ContainerRow) -> AdminContainerView:
         container_id=row.container_id,
         image=row.image,
         user_id=row.user_id,
+        gitee_url=row.gitee_url,
         gitee_user=row.gitee_user,
         gitee_repository=row.gitee_repository,
         gitee_branch=row.gitee_branch,

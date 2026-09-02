@@ -38,6 +38,7 @@ def create_container(request: CreateContainerRequest) -> CreateContainerResponse
     created = container.create_container(
         container.CreateContainerParams(
             user_id=request.user_id,
+            gitee_url=request.gitee_url,
             gitee_user=request.gitee_user,
             gitee_repository=request.gitee_repository,
             gitee_branch=request.gitee_branch,

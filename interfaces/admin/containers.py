@@ -46,6 +46,7 @@ def create_container(request: AdminCreateContainerRequest) -> AdminContainerResp
         container_service.CreateContainerParams(
             user_id=request.user_id,
             image=full_name,
+            gitee_url=request.gitee_url,
             gitee_user=request.gitee_user,
             gitee_repository=request.gitee_repository,
             gitee_branch=request.gitee_branch,
@@ -145,6 +146,7 @@ def _container_response(view: container_service.AdminContainerView) -> AdminCont
         container_id=view.container_id,
         image=view.image,
         user_id=view.user_id,
+        gitee_url=view.gitee_url,
         gitee_user=view.gitee_user,
         gitee_repository=view.gitee_repository,
         gitee_branch=view.gitee_branch,

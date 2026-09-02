@@ -34,6 +34,7 @@ class ContainerCreateRequestBase(BaseModel):
     gitee_user: Optional[str] = Field(default=None, description="码云用户名")
     gitee_repository: Optional[str] = Field(default=None, description="码云仓库")
     gitee_branch: Optional[str] = Field(default=None, description="仓库分支 (可选)")
+    gitee_url: Optional[str] = Field(default="", description="码云仓库地址前缀")
     authorize_general_account: Optional[bool] = Field(
         default=False,
         description="是否授权通用码云账户登录",

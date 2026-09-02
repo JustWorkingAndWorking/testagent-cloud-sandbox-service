@@ -106,6 +106,7 @@ class AdminCreateContainerRequest(ContainerCreateRequestBase):
                     "gitee_user": "test_name",
                     "gitee_repository": "test_project",
                     "gitee_branch": "develop",
+                    "gitee_url": "https://github.com",
                     "expiration_hours": settings.container_default_expiration_hours,
                     "authorize_general_account": False,
                     "cpu": 1,
@@ -137,6 +138,7 @@ class AdminContainerResponse(ContainerRuntimeResponse):
     gitee_user: str = Field(description="码云用户名")
     gitee_repository: str = Field(description="码云仓库")
     gitee_branch: Optional[str] = Field(default=None, description="码云分支，未设置时为空")
+    gitee_url: str = Field(description="码云仓库地址")
     created_at: str = Field(description="容器创建时间")
     expiration_hours: int = Field(description="容器运行时长，单位小时")
     authorize_general_account: bool = Field(description="是否授权通用码云账户登录")

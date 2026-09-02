@@ -26,7 +26,7 @@ class Base(DeclarativeBase):
 
 
 class Container(Base):
-    """`containers` 容器业务数据（v4 §6.2.1；变更 #2 增加 `authorize_general_account`）。"""
+    """`containers` 容器业务数据（含 Gitee 仓库地址）。"""
 
     __tablename__ = "containers"
 
@@ -37,6 +37,7 @@ class Container(Base):
     gitee_user: Mapped[str] = mapped_column(String(128))
     gitee_repository: Mapped[str] = mapped_column(String(128))
     gitee_branch: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    gitee_url: Mapped[str] = mapped_column(String(512), default="")
     authorize_general_account: Mapped[bool] = mapped_column(Boolean)
 
     created_at: Mapped[str] = mapped_column(String(32))

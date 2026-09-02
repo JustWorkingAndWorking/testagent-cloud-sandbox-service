@@ -36,6 +36,7 @@ class CreateContainerRequest(ContainerCreateRequestBase):
                     "gitee_user": "test_name",
                     "gitee_repository": "test_project",
                     "gitee_branch": "develop",
+                    "gitee_url": "https://github.com",
                     "authorize_general_account": True,
                 }
             ]

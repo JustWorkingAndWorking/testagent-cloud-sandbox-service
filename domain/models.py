@@ -45,6 +45,7 @@ class Container:
     gitee_user: str
     gitee_repository: str
     gitee_branch: Optional[str]
+    gitee_url: str
     authorize_general_account: bool
 
     created_at: str
