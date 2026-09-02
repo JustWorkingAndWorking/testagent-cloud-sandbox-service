@@ -84,6 +84,17 @@ class OpenSandboxClient:
                 timeout=None,
                 connection_config=self._config,
                 skip_health_check=skip_health_check,
+                entrypoint=[
+                    "/bin/sh",
+                    "-c",
+                    (
+                        "if [ -x /root/.start.sh ]; then "
+                        "exec /root/.start.sh /usr/sbin/sshd -D -e; "
+                        "else "
+                        "printf '%s\\n' '/root/.start.sh not found' >&2; "
+                        "fi"
+                    ),
+                ],
             )
             container_id = sandbox.id
             sandbox.close()
