@@ -37,6 +37,11 @@ services:
 
 在项目根目录执行 `docker build -t testagent/testagent-cloud-sandbox-service:latest .` 构建镜像
 
+在项目根目录执行 `docker save -o testagent-cloud-sandbox-service.tar testagent/testagent-cloud-sandbox-service:latest` 保存镜像
+
+在项目根目录执行 `$in="testagent-cloud-sandbox-service.tar"; $out="$in.gz"; $src=[IO.File]::OpenRead($in); $dst=[IO.File]::Create($out); $gz=[IO.Compression.GZipStream]::new($dst,[IO.Compression.CompressionMode]::Compress); $src.CopyTo($gz); $gz.Dispose(); $dst.Dispose(); $src.Dispose()
+` 压缩镜像
+
 在项目根目录执行 `docker compose up -d`
 
 如果没有修改默认的映射端口，则访问 `http://localhost:8080/docs` 查看 API 文档，
