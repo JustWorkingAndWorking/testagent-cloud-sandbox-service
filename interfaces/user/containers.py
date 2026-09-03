@@ -54,8 +54,6 @@ def create_container(request: CreateContainerRequest) -> CreateContainerResponse
         endpoint=view.endpoint,
         started_at=view.started_at,
         expires_at=add_hours_to_iso(created.created_at, created.expiration_hours),
-        cpu_usage=view.cpu_usage,
-        memory_usage=view.memory_usage,
     )
 
 

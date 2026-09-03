@@ -44,8 +44,12 @@ class CreateContainerRequest(ContainerCreateRequestBase):
     )
 
 
-class CreateContainerResponse(ContainerRuntimeResponse):
-    ...
+class CreateContainerResponse(BaseModel):
+    container_id: str = Field(description="容器 ID")
+    status: str = Field(description="容器状态")
+    endpoint: str | None = Field(default=None, description="容器 SSH 访问端点")
+    started_at: str | None = Field(default=None, description="容器启动时间")
+    expires_at: str | None = Field(default=None, description="容器预计删除时间")
 
 
 class ContainerStatusResponse(ContainerRuntimeResponse):

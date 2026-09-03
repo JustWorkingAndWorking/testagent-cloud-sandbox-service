@@ -48,7 +48,7 @@ class ContainerRuntimeResponse(BaseModel):
     status: str = Field(description="容器状态")
     endpoint: Optional[str] = Field(default=None, description="容器 SSH 访问端点")
     started_at: Optional[str] = Field(default=None, description="容器启动时间")
-    expires_at: Optional[str] = Field(default=None, description="容器预计业务删除时间")
+    expires_at: Optional[str] = Field(default=None, description="容器预计删除时间")
     cpu_usage: Optional[float] = Field(
         default=None,
         description="容器 CPU 使用率",
