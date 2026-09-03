@@ -254,4 +254,5 @@ temp/
 .dockerignore
 .gitignore
 compose.yaml
+compose.yaml.example
 Dockerfile

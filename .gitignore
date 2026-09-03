@@ -169,3 +169,5 @@ tests/
 
 data/
 temp/
+
+compose.yaml
