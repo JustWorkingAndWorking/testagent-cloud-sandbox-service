@@ -3,7 +3,7 @@
 
 - 环境变量由外部调用方注入（compose / shell 等，本进程不加载 .env）；
   导入 `config` 即触发必填环境变量校验，缺失即启动失败（v4 §5.1）。
-- 初始化 SQLite（幂等建表），启动单实例 Scheduler 后台循环（v4 §13.1）。
+- 启动时将 SQLite 迁移到最新架构，启动单实例 Scheduler 后台循环（v4 §13.1）。
 - 以 uvicorn 承载 REST API（`0.0.0.0:{TA_SS_REST_API_PORT}`，默认 8080）；本进程仅装配 REST API 与 Scheduler。
 """
 

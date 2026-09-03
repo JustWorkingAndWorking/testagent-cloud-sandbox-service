@@ -1,5 +1,6 @@
 """
-表定义（v4 §6.2）：`containers`、`settings`、`whitelist_users`、`admin_users`。
+表定义（v4 §6.2）：`containers`、`settings`、`whitelist_users`、`admin_users`；
+另含由迁移维护的 `schema_version` 元数据表。
 
 注：`containers` 表不设唯一约束；模式/数量限制在应用层（application）校验，
 以便白名单用户跳过约束（变更 #3）。
@@ -9,7 +10,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from sqlalchemy import Boolean, Integer, String
+from sqlalchemy import Boolean, CheckConstraint, Integer, String
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 __all__ = [
@@ -18,6 +19,7 @@ __all__ = [
     "SettingsRow",
     "WhitelistUserRow",
     "AdminUserRow",
+    "SchemaVersionRow",
 ]
 
 
@@ -69,3 +71,16 @@ class AdminUserRow(Base):
 
     #: 管理员用户 ID；管理员清单不参与鉴权或其他业务逻辑
     user_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+
+
+class SchemaVersionRow(Base):
+    """数据库架构版本元数据；仅允许一条版本记录。"""
+
+    __tablename__ = "schema_version"
+    __table_args__ = (
+        CheckConstraint("id = 1", name="ck_schema_version_single_row"),
+        CheckConstraint("version >= 1", name="ck_schema_version_positive"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    version: Mapped[int] = mapped_column(Integer, nullable=False)
