@@ -37,7 +37,7 @@ services:
 
 在项目根目录执行 `docker build -t testagent/testagent-cloud-sandbox-service:latest .` 构建镜像
 
-在项目根目录执行 `docker compose up -d `
+在项目根目录执行 `docker compose up -d`
 
 如果没有修改默认的映射端口，则访问 `http://localhost:8080/docs` 查看 API 文档，
 鉴权密码在 `.env` 中设置。
