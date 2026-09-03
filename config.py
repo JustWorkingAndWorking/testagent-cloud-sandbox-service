@@ -20,6 +20,7 @@ from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 from typing import Iterator, Literal, Optional, cast
+from urllib.parse import urlsplit
 
 __all__ = [
     "ConfigError",
@@ -97,9 +98,9 @@ class Settings:
     rest_api_password: str
     #: 日志级别：DEBUG / INFO / WARNING / ERROR
     log_level: str
-    #: 容器内 PIP 包索引地址；为空时仍向容器注入空值
+    #: 容器内 PIP 包索引地址；为空时不设置，非空必须为 HTTP/HTTPS URL
     container_pip_index_url: str = ""
-    #: 容器内 NPM Registry 地址；为空时仍向容器注入空值
+    #: 容器内 NPM Registry 地址；为空时不设置，非空必须为 HTTP/HTTPS URL
     container_npm_registry: str = ""
     #: 容器默认 CPU 核数；可由管理端 limit 配置覆盖
     container_default_cpu: float = 1.0
@@ -119,6 +120,30 @@ def _string(name: str, default: Optional[str] = None) -> str:
 def _string_or_none(name: str) -> Optional[str]:
     value = os.environ.get(_ENV_PREFIX + name)
     return value if value else None
+
+
+def _optional_url(name: str) -> str:
+    """读取可选 HTTP(S) URL；空值表示不设置对应代理。"""
+    value = os.environ.get(_ENV_PREFIX + name, "")
+    if value == "":
+        return value
+    if any(char.isspace() for char in value):
+        raise ConfigError(
+            f"环境变量 {_ENV_PREFIX + name} 必须为合法的 HTTP/HTTPS URL: {value!r}"
+        )
+    try:
+        parsed = urlsplit(value)
+        hostname = parsed.hostname
+        _ = parsed.port  # 访问 port 以校验非法端口格式和范围
+    except ValueError as exc:
+        raise ConfigError(
+            f"环境变量 {_ENV_PREFIX + name} 必须为合法的 HTTP/HTTPS URL: {value!r}"
+        ) from exc
+    if parsed.scheme.lower() not in ("http", "https") or not parsed.netloc or not hostname:
+        raise ConfigError(
+            f"环境变量 {_ENV_PREFIX + name} 必须为合法的 HTTP/HTTPS URL: {value!r}"
+        )
+    return value
 
 
 def _image_registry() -> str:
@@ -220,8 +245,8 @@ settings: Settings = Settings(
     scheduler_poll_interval_seconds=_int("SCHEDULER_POLL_INTERVAL_SECONDS", 5, minimum=1),
     rest_api_port=_int("REST_API_PORT", 8080, minimum=1, maximum=65535),
     log_level=_log_level,
-    container_pip_index_url=_string("PROXY_PIP_INDEX_URL", ""),
-    container_npm_registry=_string("PROXY_NPM_REGISTRY", ""),
+    container_pip_index_url=_optional_url("PROXY_PIP_INDEX_URL"),
+    container_npm_registry=_optional_url("PROXY_NPM_REGISTRY"),
     container_default_cpu=_float("CONTAINER_DEFAULT_CPU", 1.0, minimum=0.01),
     container_default_memory=_int("CONTAINER_DEFAULT_MEMORY", 1, minimum=1),
 )
