@@ -14,7 +14,7 @@ import logging
 import threading
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Optional
+from typing import Callable, Optional, cast
 from zoneinfo import ZoneInfo
 
 from config import Constants, settings
@@ -22,6 +22,7 @@ from application import container as _container
 from domain.models import ContainerStatus, add_hours_to_iso, map_runtime_state
 from infra.db import session_scope
 from infra.opensandbox.client import OpenSandboxError, SandboxNotFoundError
+from infra.opensandbox.types import SandboxMetrics
 from infra.repositories import ContainerRepository
 
 logger = logging.getLogger(__name__)
@@ -52,6 +53,8 @@ class CachedRuntimeStatus:
     status: ContainerStatus
     endpoint: Optional[str] = None
     started_at: Optional[str] = None
+    cpu_usage: Optional[float] = None
+    memory_usage: Optional[float] = None
 
 
 # 管理 API 需要的运行时附加字段也随状态刷新缓存，避免每次请求直连后端。
@@ -213,6 +216,8 @@ def refresh_status_cache() -> None:
                     status=ContainerStatus.UNKNOWN,
                     endpoint=None,
                     started_at=None,
+                    cpu_usage=None,
+                    memory_usage=None,
                 ),
                 False,
                 True,
@@ -324,7 +329,43 @@ def _fetch_runtime_status(
         )
         failed = True
 
-    return CachedRuntimeStatus(status=status, endpoint=endpoint, started_at=started_at), False, failed
+    cpu_usage: Optional[float] = None
+    memory_usage: Optional[float] = None
+    get_metrics = getattr(client, "get_metrics", None)
+    if callable(get_metrics):
+        # noinspection unnecessary-cast
+        get_metrics_callable = cast(Callable[[str], object], get_metrics)
+        try:
+            metrics = get_metrics_callable(container_id)
+            if not isinstance(metrics, SandboxMetrics):
+                raise TypeError("资源使用率返回类型无效")
+            cpu_usage = metrics.cpu_usage
+            memory_usage = metrics.memory_usage
+        except SandboxNotFoundError:
+            return None, True, False
+        except OpenSandboxError as exc:
+            logger.error("状态刷新获取资源使用率失败: %s: %s", container_id, exc)
+            failed = True
+        except Exception as exc:  # noqa: BLE001 资源指标失败不影响状态缓存
+            logger.error(
+                "状态刷新获取资源使用率失败: %s: %s: %s",
+                container_id,
+                type(exc).__name__,
+                exc,
+            )
+            failed = True
+
+    return (
+        CachedRuntimeStatus(
+            status=status,
+            endpoint=endpoint,
+            started_at=started_at,
+            cpu_usage=cpu_usage,
+            memory_usage=memory_usage,
+        ),
+        False,
+        failed,
+    )
 
 
 def get_cached_status(container_id: str) -> Optional[ContainerStatus]:

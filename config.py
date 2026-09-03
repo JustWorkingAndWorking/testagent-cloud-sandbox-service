@@ -13,6 +13,7 @@
 
 from __future__ import annotations
 
+import math
 import os
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -28,6 +29,8 @@ __all__ = [
     "set_default_image",
     "get_container_count_limit",
     "set_container_count_limit",
+    "get_container_resource_limits",
+    "set_container_resource_limits",
 ]
 
 _ENV_PREFIX = "TA_SS_"
@@ -94,6 +97,14 @@ class Settings:
     rest_api_password: str
     #: 日志级别：DEBUG / INFO / WARNING / ERROR
     log_level: str
+    #: 容器内 PIP 包索引地址；为空时仍向容器注入空值
+    container_pip_index_url: str = ""
+    #: 容器内 NPM Registry 地址；为空时仍向容器注入空值
+    container_npm_registry: str = ""
+    #: 容器默认 CPU 核数；可由管理端 limit 配置覆盖
+    container_default_cpu: float = 1.0
+    #: 容器默认内存大小，单位 Gi；可由管理端 limit 配置覆盖
+    container_default_memory: int = 1
 
 
 def _string(name: str, default: Optional[str] = None) -> str:
@@ -148,6 +159,38 @@ def _int(
     return value
 
 
+def _float(
+    name: str,
+    default: Optional[float] = None,
+    *,
+    minimum: Optional[float] = None,
+    maximum: Optional[float] = None,
+) -> float:
+    raw = os.environ.get(_ENV_PREFIX + name)
+    if raw is None or raw == "":
+        if default is None:
+            raise ConfigError(f"缺少必填环境变量 {_ENV_PREFIX + name}")
+        value = default
+    else:
+        try:
+            value = float(raw)
+        except ValueError:
+            raise ConfigError(f"环境变量 {_ENV_PREFIX + name} 无法解析为数字: {raw!r}")
+
+    if not math.isfinite(value):
+        raw: str
+        raise ConfigError(f"环境变量 {_ENV_PREFIX + name} 必须为有限数字: {raw!r}")
+    if minimum is not None and value < minimum:
+        raise ConfigError(
+            f"环境变量 {_ENV_PREFIX + name} 必须大于等于 {minimum}: {value}"
+        )
+    if maximum is not None and value > maximum:
+        raise ConfigError(
+            f"环境变量 {_ENV_PREFIX + name} 必须小于等于 {maximum}: {value}"
+        )
+    return value
+
+
 _create_limit_mode = cast(ContainerCreateLimitMode, _string("CONTAINER_CREATE_LIMIT_MODE"))
 if _create_limit_mode not in CONTAINER_CREATE_LIMIT_MODES:
     raise ConfigError(
@@ -177,16 +220,22 @@ settings: Settings = Settings(
     scheduler_poll_interval_seconds=_int("SCHEDULER_POLL_INTERVAL_SECONDS", 5, minimum=1),
     rest_api_port=_int("REST_API_PORT", 8080, minimum=1, maximum=65535),
     log_level=_log_level,
+    container_pip_index_url=_string("PROXY_PIP_INDEX_URL", ""),
+    container_npm_registry=_string("PROXY_NPM_REGISTRY", ""),
+    container_default_cpu=_float("CONTAINER_DEFAULT_CPU", 1.0, minimum=0.01),
+    container_default_memory=_int("CONTAINER_DEFAULT_MEMORY", 1, minimum=1),
 )
 
 
 # ---------------------------------------------------------------------------
-# settings 读写（v4 §4.3 / §6.2.2）：`default_image` / `container_count_limit`
+# settings 读写（v4 §4.3 / §6.2.2）：默认镜像、容器数量及资源限制
 # 应用层与接口层通过本模块访问，不直接操作 settings 表。
 # ---------------------------------------------------------------------------
 
 SETTINGS_KEY_DEFAULT_IMAGE = "default_image"
 SETTINGS_KEY_CONTAINER_COUNT_LIMIT = "container_count_limit"
+SETTINGS_KEY_CONTAINER_CPU_LIMIT = "container_cpu_limit"
+SETTINGS_KEY_CONTAINER_MEMORY_LIMIT = "container_memory_limit"
 
 
 @contextmanager
@@ -230,3 +279,48 @@ def set_container_count_limit(value: int) -> None:
     """设置容器数量限制。"""
     with _settings_scope() as repo:
         repo.set(SETTINGS_KEY_CONTAINER_COUNT_LIMIT, str(int(value)))
+
+
+def get_container_resource_limits() -> tuple[float, int]:
+    """读取容器 CPU/内存限制；数据库未设置时返回环境变量默认值。"""
+    with _settings_scope() as repo:
+        cpu_row = repo.get(SETTINGS_KEY_CONTAINER_CPU_LIMIT)
+        memory_row = repo.get(SETTINGS_KEY_CONTAINER_MEMORY_LIMIT)
+
+    if cpu_row is None:
+        cpu = settings.container_default_cpu
+    else:
+        try:
+            cpu = float(cpu_row.value)
+        except ValueError:
+            raise ConfigError(f"数据库中的容器 CPU 限制非法: {cpu_row.value!r}")
+        if not math.isfinite(cpu) or cpu <= 0:
+            raise ConfigError(f"数据库中的容器 CPU 限制非法: {cpu_row.value!r}")
+
+    if memory_row is None:
+        memory = settings.container_default_memory
+    else:
+        try:
+            memory = int(memory_row.value)
+        except ValueError:
+            raise ConfigError(f"数据库中的容器内存限制非法: {memory_row.value!r}")
+        if memory <= 0:
+            raise ConfigError(f"数据库中的容器内存限制非法: {memory_row.value!r}")
+
+    return cpu, memory
+
+
+def set_container_resource_limits(cpu: float, memory: int) -> None:
+    """设置容器 CPU/内存限制。"""
+    if (
+        isinstance(cpu, bool)
+        or not isinstance(cpu, (int, float))
+        or not math.isfinite(cpu)
+        or cpu <= 0
+    ):
+        raise ConfigError("容器 CPU 限制必须为正数")
+    if isinstance(memory, bool) or not isinstance(memory, int) or memory <= 0:
+        raise ConfigError("容器内存限制必须为正整数")
+    with _settings_scope() as repo:
+        repo.set(SETTINGS_KEY_CONTAINER_CPU_LIMIT, format(cpu, "g"))
+        repo.set(SETTINGS_KEY_CONTAINER_MEMORY_LIMIT, str(memory))

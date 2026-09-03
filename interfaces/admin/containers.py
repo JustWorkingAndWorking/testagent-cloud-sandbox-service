@@ -78,7 +78,7 @@ def list_containers() -> AdminContainerListResponse:
     responses=api_responses("成功", 200),
 )
 def get_container_limit() -> ContainerLimitResponse:
-    """获取当前活动容器数量和容器可用数目上限。"""
+    """获取容器数量及资源限制配置。"""
     return _limit_response(container_service.get_container_limit())
 
 
@@ -89,8 +89,14 @@ def get_container_limit() -> ContainerLimitResponse:
     responses=api_responses("成功", 200, 400),
 )
 def set_container_limit(request: ContainerLimitRequest) -> ContainerLimitResponse:
-    """设置容器容器可用数目上限。"""
-    return _limit_response(container_service.set_container_limit(request.container_limit))
+    """设置容器数量及资源限制配置。"""
+    return _limit_response(
+        container_service.set_container_limit(
+            request.container_limit,
+            cpu=request.cpu,
+            memory=request.memory,
+        )
+    )
 
 
 @router.get(
@@ -157,6 +163,8 @@ def _container_response(view: container_service.AdminContainerView) -> AdminCont
         endpoint=view.endpoint,
         started_at=view.started_at,
         expires_at=view.expires_at,
+        cpu_usage=view.cpu_usage,
+        memory_usage=view.memory_usage,
         deleted_at=view.deleted_at,
         business_deleted=view.business_deleted,
     )
@@ -164,6 +172,7 @@ def _container_response(view: container_service.AdminContainerView) -> AdminCont
 
 def _limit_response(view: container_service.ContainerLimitView) -> ContainerLimitResponse:
     return ContainerLimitResponse(
-        container_count=view.container_count,
         container_limit=view.container_limit,
+        cpu=view.cpu,
+        memory=view.memory,
     )

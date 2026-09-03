@@ -30,6 +30,7 @@ __all__ = [
     "AdminCreateContainerRequest",
     "AdminContainerResponse",
     "AdminContainerListResponse",
+    "AdminStateResponse",
     "ExpirationRequest",
     "ExpirationResponse",
     "ContainerLimitRequest",
@@ -152,14 +153,29 @@ class AdminContainerListResponse(BaseModel):
     containers: list[AdminContainerResponse] = Field(description="全部容器完整信息")
 
 
+class AdminStateResponse(BaseModel):
+    """沙盒服务状态响应"""
+
+    container_count: int = Field(description="活跃容器数")
+    whitelist_container_count: int = Field(description="白名单用户容器数")
+    admin_container_count: int = Field(description="管理员用户容器数")
+    whitelist_count: int = Field(description="白名单用户数")
+    admin_count: int = Field(description="管理员用户数")
+
+
 class ContainerLimitRequest(BaseModel):
-    """容器数量限制变更请求。"""
+    """容器数量及资源限制变更请求"""
+
+    model_config = ConfigDict(extra="forbid")
 
     container_limit: int = Field(ge=0, description="容器数量上限，0 表示取消数量限制")
+    cpu: float = Field(gt=0, description="全部容器 CPU 限制，单位为核数")
+    memory: int = Field(gt=0, description="全部容器内存限制，单位为 Gi")
 
 
 class ContainerLimitResponse(BaseModel):
-    """容器数量限制响应。"""
+    """容器数量及资源限制响应"""
 
-    container_count: int = Field(description="当前容器数目")
     container_limit: int = Field(description="当前容器限制")
+    cpu: float = Field(description="全部容器 CPU 限制，单位为核数")
+    memory: int = Field(description="全部容器内存限制，单位为 Gi")

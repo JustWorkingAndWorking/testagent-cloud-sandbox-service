@@ -8,5 +8,6 @@ __all__ = [
     "schemas",
     "images",
     "users",
+    "state",
     "containers",
 ]

@@ -23,7 +23,9 @@ from zoneinfo import ZoneInfo
 from config import Constants, settings
 from config import get_container_count_limit as _cfg_count_limit
 from config import get_default_image as _cfg_default_image
+from config import get_container_resource_limits as _cfg_resource_limits
 from config import set_container_count_limit as _cfg_set_count_limit
+from config import set_container_resource_limits as _cfg_set_resource_limits
 from domain.errors import (
     BusinessConflictError,
     ContainerNotFoundError,
@@ -35,9 +37,18 @@ from domain.errors import (
 from domain.models import ContainerStatus, add_hours_to_iso, map_runtime_state
 from infra.db import session_scope
 from infra.opensandbox.client import OpenSandboxError, SandboxNotFoundError
-from infra.opensandbox.types import CreatedSandbox, SandboxEndpoint, SandboxStatus
+from infra.opensandbox.types import (
+    CreatedSandbox,
+    SandboxEndpoint,
+    SandboxMetrics,
+    SandboxStatus,
+)
 from infra.orm import Container as ContainerRow
-from infra.repositories import ContainerRepository
+from infra.repositories import (
+    AdminUserRepository,
+    ContainerRepository,
+    WhitelistUserRepository,
+)
 
 if TYPE_CHECKING:
     from infra.opensandbox.client import OpenSandboxClient
@@ -51,6 +62,7 @@ __all__ = [
     "ExpirationView",
     "AdminContainerView",
     "ContainerLimitView",
+    "AdminStateView",
     "get_status",
     "create_container",
     "get_opensandbox_client",
@@ -130,6 +142,8 @@ class ContainerStatusView:
     endpoint: Optional[str] = None
     started_at: Optional[str] = None
     expires_at: Optional[str] = None
+    cpu_usage: Optional[float] = None
+    memory_usage: Optional[float] = None
     gitee_user: str = ""
     gitee_repository: str = ""
     gitee_url: str = ""
@@ -159,16 +173,30 @@ class AdminContainerView:
     endpoint: Optional[str]
     started_at: Optional[str]
     expires_at: Optional[str]
+    cpu_usage: Optional[float]
+    memory_usage: Optional[float]
     deleted_at: Optional[str]
     business_deleted: bool
 
 
 @dataclass(frozen=True)
 class ContainerLimitView:
-    """管理端容器数量限制视图。"""
+    """管理端容器数量及资源限制视图。"""
+
+    container_limit: int
+    cpu: float
+    memory: int
+
+
+@dataclass(frozen=True)
+class AdminStateView:
+    """管理员首页基础统计视图。"""
 
     container_count: int
-    container_limit: int
+    whitelist_container_count: int
+    admin_container_count: int
+    whitelist_count: int
+    admin_count: int
 
 
 # ---------------------------------------------------------------------------
@@ -209,7 +237,8 @@ def create_container(params: CreateContainerParams) -> CreatedContainer:
       环境变量注入 `TESTAGENT_CLOUD_USER_ID` / `TESTAGENT_CLOUD_GITEE_URL` /
        `TESTAGENT_CLOUD_GITEE_USER` / `TESTAGENT_CLOUD_GITEE_REPOSITORY` /
        `TESTAGENT_CLOUD_GITEE_BRANCH`（为空也注入空值）
-       及 `TESTAGENT_CLOUD_AUTHORIZE_GENERAL_ACCOUNT`（true/false）；CPU / 内存可选覆盖默认资源限制。
+       及 `TESTAGENT_CLOUD_AUTHORIZE_GENERAL_ACCOUNT`（true/false），并注入
+       `PIP_INDEX_URL` / `NPM_CONFIG_REGISTRY` 代理源；CPU / 内存可选覆盖默认资源限制。
     """
     _validate_required(params)
     gitee_url = _normalise_optional_gitee_value(params.gitee_url)
@@ -241,6 +270,8 @@ def create_container(params: CreateContainerParams) -> CreatedContainer:
             "TESTAGENT_CLOUD_AUTHORIZE_GENERAL_ACCOUNT": (
                 "true" if params.authorize_general_account is True else "false"
             ),
+            "TESTAGENT_CLOUD_PIP_URL": settings.container_pip_index_url,
+            "TESTAGENT_CLOUD_NPM_URL": settings.container_npm_registry,
         }
         container_name = uuid.uuid4().hex[:12]
         try:
@@ -347,15 +378,12 @@ def _normalise_optional_gitee_value(value: Optional[str]) -> str:
     return value
 
 
-def _resource_limits(params: CreateContainerParams) -> Optional[dict[str, str]]:
-    """仅在调用方指定资源时传递覆盖值；底层会与默认限额合并。"""
-    if params.cpu is None and params.memory is None:
-        return None
-    limits: dict[str, str] = {}
-    if params.cpu is not None:
-        limits["cpu"] = format(params.cpu, "g")
-    if params.memory is not None:
-        limits["memory"] = f"{params.memory}Gi"
+def _resource_limits(params: CreateContainerParams) -> dict[str, str]:
+    """解析最终资源值；调用方未覆盖时使用 limit 配置。"""
+    default_cpu, default_memory = _cfg_resource_limits()
+    cpu = params.cpu if params.cpu is not None else default_cpu
+    memory = params.memory if params.memory is not None else default_memory
+    limits: dict[str, str] = {"cpu": format(cpu, "g"), "memory": f"{memory}Gi"}
     return limits
 
 
@@ -422,12 +450,16 @@ def get_status(container_id: str) -> ContainerStatusView:
     except Exception as exc:  # noqa: BLE001
         _raise_backend_service_error("获取容器端点", exc)
 
+    cpu_usage, memory_usage = _get_metrics(container_id)
+
     return ContainerStatusView(
         container_id=container_id,
         status=business,
         endpoint=endpoint,
         started_at=status.transitioned_at,
         expires_at=add_hours_to_iso(row.created_at, row.expiration_hours),
+        cpu_usage=cpu_usage,
+        memory_usage=memory_usage,
         gitee_url=row.gitee_url,
         gitee_user=row.gitee_user,
         gitee_repository=row.gitee_repository,
@@ -520,6 +552,34 @@ def restore(container_id: str, expiration_hours: int) -> ContainerStatusView:
     return get_status(container_id)
 
 
+def _get_metrics(container_id: str) -> tuple[Optional[float], Optional[float]]:
+    """读取容器资源使用率；旧测试替身未提供 metrics 时返回空值。"""
+    get_metrics = getattr(get_opensandbox_client(), "get_metrics", None)
+    if not callable(get_metrics):
+        return None, None
+    try:
+        # noinspection calling-non-callable
+        metrics = get_metrics(container_id)
+    except SandboxNotFoundError as exc:
+        delete_missing_container_record(container_id)
+        raise ContainerNotFoundError("后端容器不存在") from exc
+    except OpenSandboxError as exc:
+        logger.error("获取容器资源使用率失败: %s: %s", container_id, exc)
+        return None, None
+    except Exception as exc:
+        logger.error(
+            "获取容器资源使用率失败: %s: %s: %s",
+            container_id,
+            type(exc).__name__,
+            exc,
+        )
+        return None, None
+    if not isinstance(metrics, SandboxMetrics):
+        logger.error("获取容器资源使用率失败: %s: 返回类型无效", container_id)
+        return None, None
+    return metrics.cpu_usage, metrics.memory_usage
+
+
 # ---------------------------------------------------------------------------
 # 立即删除（T6.6，仅管理 API）
 # ---------------------------------------------------------------------------
@@ -608,25 +668,63 @@ def get_admin_container(container_id: str) -> AdminContainerView:
 
 
 def get_container_limit() -> ContainerLimitView:
-    """读取容器限制及当前未业务删除记录数。"""
-    with session_scope() as session:
-        container_count = ContainerRepository(session).count_active()
+    """读取容器数量及资源限制配置。"""
+    cpu, memory = _cfg_resource_limits()
     return ContainerLimitView(
-        container_count=container_count,
         container_limit=_cfg_count_limit(),
+        cpu=cpu,
+        memory=memory,
     )
 
 
-def set_container_limit(container_limit: int) -> ContainerLimitView:
-    """设置容器数量限制并返回最新限制视图。"""
+def set_container_limit(
+    container_limit: int,
+    *,
+    cpu: float,
+    memory: int,
+) -> ContainerLimitView:
+    """设置容器数量及资源限制并返回最新限制视图。"""
     if (
         isinstance(container_limit, bool)
         or not isinstance(container_limit, int)
         or container_limit < 0
     ):
         raise InvalidArgumentError("container_limit 必须为非负整数")
+    if (
+        isinstance(cpu, bool)
+        or not isinstance(cpu, (int, float))
+        or not math.isfinite(cpu)
+        or cpu <= 0
+    ):
+        raise InvalidArgumentError("cpu 必须为正数")
+    if (
+        isinstance(memory, bool)
+        or not isinstance(memory, int)
+        or memory <= 0
+    ):
+        raise InvalidArgumentError("memory 必须为正整数")
     _cfg_set_count_limit(container_limit)
+    _cfg_set_resource_limits(cpu, memory)
     return get_container_limit()
+
+
+def get_admin_state() -> AdminStateView:
+    """读取未业务删除容器及白名单/管理员清单的基础统计。"""
+    with session_scope() as session:
+        container_repo = ContainerRepository(session)
+        whitelist_ids = {
+            row.user_id for row in WhitelistUserRepository(session).list_all()
+        }
+        admin_ids = {row.user_id for row in AdminUserRepository(session).list_all()}
+        containers = container_repo.list_active()
+
+    return AdminStateView(
+        container_count=len(containers),
+        whitelist_container_count=sum(row.user_id in whitelist_ids for row in containers),
+        admin_container_count=sum(row.user_id in admin_ids for row in containers),
+        whitelist_count=len(whitelist_ids),
+        admin_count=len(admin_ids),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -703,6 +801,8 @@ def _is_image_not_found_error(exc: Exception) -> bool:
 
 
 def _to_admin_view(row: ContainerRow) -> AdminContainerView:
+    cpu_usage: Optional[float] = None
+    memory_usage: Optional[float] = None
     if row.deleted_at is not None:
         status = ContainerStatus.BUSINESS_DELETED
         endpoint: Optional[str] = None
@@ -714,6 +814,8 @@ def _to_admin_view(row: ContainerRow) -> AdminContainerView:
         endpoint = runtime.endpoint
         started_at = runtime.started_at
         expires_at = runtime.expires_at
+        cpu_usage = runtime.cpu_usage
+        memory_usage = runtime.memory_usage
 
     return AdminContainerView(
         container_id=row.container_id,
@@ -730,6 +832,8 @@ def _to_admin_view(row: ContainerRow) -> AdminContainerView:
         endpoint=endpoint,
         started_at=started_at,
         expires_at=expires_at,
+        cpu_usage=cpu_usage,
+        memory_usage=memory_usage,
         deleted_at=row.deleted_at,
         business_deleted=row.deleted_at is not None,
     )
@@ -747,6 +851,8 @@ def _get_admin_runtime(container_id: str) -> ContainerStatusView:
             status=cached.status,
             endpoint=cached.endpoint,
             started_at=cached.started_at,
+            cpu_usage=cached.cpu_usage,
+            memory_usage=cached.memory_usage,
         )
 
     # 保留旧缓存的兼容读取路径：测试或进程升级期间可能只有状态缓存。

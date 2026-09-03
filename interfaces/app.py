@@ -23,6 +23,7 @@ from config import settings
 from domain.errors import AppError
 from interfaces.admin.containers import router as admin_container_router
 from interfaces.admin.images import router as admin_image_router
+from interfaces.admin.state import router as admin_state_router
 from interfaces.admin.users import router as admin_user_router
 from interfaces.user.containers import router as user_container_router
 from interfaces.user.users import router as user_user_router
@@ -43,6 +44,7 @@ def create_app() -> FastAPI:
     app.include_router(user_user_router)
     app.include_router(admin_image_router)
     app.include_router(admin_user_router)
+    app.include_router(admin_state_router)
     app.include_router(admin_container_router)
 
     @app.exception_handler(AppError)

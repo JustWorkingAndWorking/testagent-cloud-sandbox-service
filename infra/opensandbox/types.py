@@ -13,7 +13,8 @@ from typing import Optional
 __all__ = [
     "SandboxStatus",
     "SandboxEndpoint",
-    "CreatedSandbox"
+    "SandboxMetrics",
+    "CreatedSandbox",
 ]
 
 
@@ -35,6 +36,14 @@ class SandboxEndpoint:
 
     endpoint: str
     headers: dict[str, str] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class SandboxMetrics:
+    """容器资源使用率（CPU/内存均为百分比，范围通常为 0 到 100）。"""
+
+    cpu_usage: float
+    memory_usage: float
 
 
 @dataclass(frozen=True)

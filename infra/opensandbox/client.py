@@ -19,7 +19,12 @@ from opensandbox.config.connection_sync import ConnectionConfigSync
 from opensandbox.sync.sandbox import SandboxSync
 
 from config import Constants, settings
-from infra.opensandbox.types import CreatedSandbox, SandboxEndpoint, SandboxStatus
+from infra.opensandbox.types import (
+    CreatedSandbox,
+    SandboxEndpoint,
+    SandboxMetrics,
+    SandboxStatus,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -129,6 +134,28 @@ class OpenSandboxClient:
             endpoint=endpoint.endpoint,
             headers=dict(endpoint.headers or {})
         )
+
+    def get_metrics(self, container_id: str) -> SandboxMetrics:
+        """获取容器当前 CPU/内存使用率（百分比）。"""
+        raw = self._run(container_id, "获取容器资源使用率", lambda sb: sb.get_metrics())
+        try:
+            cpu_usage = _metric_number(
+                getattr(raw, "cpu_used_percentage", getattr(raw, "cpu_used_pct", None)),
+                "CPU 使用率",
+            )
+            memory_total = _metric_number(
+                getattr(raw, "memory_total_in_mib", getattr(raw, "mem_total_mib", None)),
+                "内存总量",
+            )
+            memory_used = _metric_number(
+                getattr(raw, "memory_used_in_mib", getattr(raw, "mem_used_mib", None)),
+                "内存使用量",
+            )
+        except (TypeError, ValueError) as exc:
+            logger.error("OpenSandbox 获取容器资源使用率失败: %s: %s: %s", container_id, type(exc).__name__, exc)
+            raise OpenSandboxError("获取容器资源使用率失败") from exc
+        memory_usage = (memory_used / memory_total * 100) if memory_total > 0 else 0.0
+        return SandboxMetrics(cpu_usage=cpu_usage, memory_usage=memory_usage)
 
     def start(self, container_id: str) -> None:
         """启动容器（v4 §11.3 Start 幂等；容器不存在视为已满足）。"""
@@ -289,6 +316,19 @@ def _to_timezone_iso(value: datetime) -> str:
     if value.tzinfo is None:
         value = value.replace(tzinfo=timezone.utc)
     return value.astimezone(_TIMEZONE).isoformat()
+
+
+def _metric_number(value: object, label: str) -> float:
+    """将 SDK 指标字段转换为有限非负数字。"""
+    if value is None or not isinstance(value, (int, float, str)):
+        raise ValueError(f"{label}缺失")
+    try:
+        number = float(value)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError(f"{label}非法: {value!r}") from exc
+    if number < 0 or number != number or number in (float("inf"), float("-inf")):
+        raise ValueError(f"{label}非法: {value!r}")
+    return number
 
 
 def _is_in_state(client: OpenSandboxClient, container_id: str, states: frozenset[str]) -> bool:
