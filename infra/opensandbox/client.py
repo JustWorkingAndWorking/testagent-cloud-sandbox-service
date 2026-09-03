@@ -13,8 +13,10 @@ import logging
 from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
 from typing import Optional, TypeVar
+from urllib.parse import urlsplit, urlunsplit
 from zoneinfo import ZoneInfo
 
+from httpx import Client as HttpxClient
 from opensandbox.config.connection_sync import ConnectionConfigSync
 from opensandbox.sync.sandbox import SandboxSync
 
@@ -137,7 +139,16 @@ class OpenSandboxClient:
 
     def get_metrics(self, container_id: str) -> SandboxMetrics:
         """获取容器当前 CPU/内存使用率（百分比）。"""
-        raw = self._run(container_id, "获取容器资源使用率", lambda sb: sb.get_metrics())
+        try:
+            raw = self._get_metrics_raw(container_id)
+        except Exception as exc:  # noqa: BLE001
+            logger.error(
+                "OpenSandbox 获取容器资源使用率失败: %s: %s: %s",
+                container_id,
+                type(exc).__name__,
+                exc,
+            )
+            raise _classify(exc, "获取容器资源使用率失败") from exc
         try:
             cpu_usage = _metric_number(
                 getattr(raw, "cpu_used_percentage", getattr(raw, "cpu_used_pct", None)),
@@ -156,6 +167,28 @@ class OpenSandboxClient:
             raise OpenSandboxError("获取容器资源使用率失败") from exc
         memory_usage = (memory_used / memory_total * 100) if memory_total > 0 else 0.0
         return SandboxMetrics(cpu_usage=cpu_usage, memory_usage=memory_usage)
+
+    def _get_metrics_raw(self, container_id: str) -> object:
+        """通过直连 execd 端点获取 metrics；仅修正服务容器不可达的 loopback 主机。"""
+        from opensandbox.constants import DEFAULT_EXECD_PORT
+        from opensandbox.sync.adapters.factory import AdapterFactorySync
+
+        factory = AdapterFactorySync(self._config)
+        sandbox_service = factory.create_sandbox_service()
+        metrics_service: object | None = None
+        try:
+            endpoint = sandbox_service.get_sandbox_endpoint(
+                container_id,
+                DEFAULT_EXECD_PORT,
+                False,
+            )
+            endpoint.endpoint = _rewrite_loopback_endpoint(endpoint.endpoint)
+            metrics_service = factory.create_metrics_service(endpoint)
+            get_metrics = getattr(metrics_service, "get_metrics")
+            return get_metrics(container_id)
+        finally:
+            _close_sdk_service(metrics_service)
+            _close_sdk_service(sandbox_service)
 
     def start(self, container_id: str) -> None:
         """启动容器（v4 §11.3 Start 幂等；容器不存在视为已满足）。"""
@@ -316,6 +349,43 @@ def _to_timezone_iso(value: datetime) -> str:
     if value.tzinfo is None:
         value = value.replace(tzinfo=timezone.utc)
     return value.astimezone(_TIMEZONE).isoformat()
+
+
+_LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
+
+
+def _rewrite_loopback_endpoint(endpoint: str) -> str:
+    """将 OpenSandbox 返回的 loopback execd 地址改为客户端可达的服务主机。"""
+    parsed = urlsplit(endpoint)
+    if not parsed.netloc:
+        parsed = urlsplit(f"//{endpoint}")
+    hostname = (parsed.hostname or "").lower()
+    if hostname not in _LOOPBACK_HOSTS:
+        return endpoint
+
+    server_url = settings.opensandbox_url
+    server = urlsplit(server_url if "://" in server_url else f"//{server_url}")
+    replacement_host = server.hostname
+    if not replacement_host:
+        return endpoint
+    try:
+        port = parsed.port
+    except ValueError:
+        return endpoint
+
+    if ":" in replacement_host and not replacement_host.startswith("["):
+        replacement_host = f"[{replacement_host}]"
+    netloc = replacement_host if port is None else f"{replacement_host}:{port}"
+    return urlunsplit(("", netloc, parsed.path, parsed.query, parsed.fragment)).lstrip("/")
+
+
+def _close_sdk_service(service: object | None) -> None:
+    """释放官方 SDK 适配器持有的 HTTP 客户端。"""
+    if service is None:
+        return
+    http_client = getattr(service, "_httpx_client", None)
+    if isinstance(http_client, HttpxClient):
+        http_client.close()
 
 
 def _metric_number(value: object, label: str) -> float:
