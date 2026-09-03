@@ -32,7 +32,7 @@ services:
 
 ## 编译与使用
 
-复制 `.env.example` 且重命名为 `.env`，
+复制 `compose.yaml.example.example` 且重命名为 `compose.yaml`，
 并根据需要修改配置
 
 在项目根目录执行 `docker build -t testagent/testagent-cloud-sandbox-service:latest .` 构建镜像
@@ -40,4 +40,4 @@ services:
 在项目根目录执行 `docker compose up -d`
 
 如果没有修改默认的映射端口，则访问 `http://localhost:8080/docs` 查看 API 文档，
-鉴权密码在 `.env` 中设置。
+鉴权密码在 `compose.yaml` 中设置。
