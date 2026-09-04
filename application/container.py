@@ -234,12 +234,13 @@ def create_container(params: CreateContainerParams) -> CreatedContainer:
     - 镜像：`params.image` 为空则使用默认镜像；默认镜像未配置抛 400 语义错误。
     - 创建限制（模式 / 数量）在此校验，白名单用户跳过全部；并发通过进程互斥 + SQLite 单写者保证。
     - 容器名：随机字符串（仅表示容器本身，不承载业务信息）；端口固定 22；
-      环境变量注入 `TESTAGENT_CLOUD_USER_ID` / `TESTAGENT_CLOUD_GITEE_URL` /
+     环境变量注入 `TESTAGENT_CLOUD_USER_ID` / `TESTAGENT_CLOUD_GITEE_URL` /
        `TESTAGENT_CLOUD_GITEE_USER` / `TESTAGENT_CLOUD_GITEE_REPOSITORY` /
        `TESTAGENT_CLOUD_GITEE_BRANCH`（为空也注入空值）
        及 `TESTAGENT_CLOUD_AUTHORIZE_GENERAL_ACCOUNT`（true/false），并注入
        `PIP_INDEX_URL` / `NPM_CONFIG_REGISTRY` 代理源；CPU / 内存可选覆盖默认资源限制。
-    """
+       OpenSandbox metadata 额外注入 `testagent-cloud=true` 用于来源识别。
+     """
     _validate_required(params)
     gitee_url = _normalise_optional_gitee_value(params.gitee_url)
     gitee_user = _normalise_optional_gitee_value(params.gitee_user)
@@ -279,7 +280,7 @@ def create_container(params: CreateContainerParams) -> CreatedContainer:
                 image,
                 name=container_name,
                 env=env,
-                metadata={"name": container_name},
+                metadata={"name": container_name, "testagent-cloud": "true"},
                 resource_limits=_resource_limits(params),
             )
         except Exception as exc:
