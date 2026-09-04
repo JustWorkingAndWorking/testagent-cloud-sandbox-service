@@ -49,6 +49,10 @@ services:
       # 与 REST API 监听端口保持一致
       - "8080:8080"
 
+    # 旧版本 Docker 兼容
+    security_opt:
+      - seccomp=unconfined
+
     volumes:
       - ./data:/app/data
 #     如果需要持久化临时上传文件
