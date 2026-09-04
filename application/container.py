@@ -2,7 +2,7 @@
 容器管理应用层（v4 §11、§14.5~§14.9）。
 
 - 后端业务逻辑集中于此：创建（含创建限制原子校验）、操作（Start/Stop/Restart）、
-  业务删除、恢复、立即删除、状态查询与剩余时间、设置业务有效时长、业务条件查询。
+  业务删除、恢复、立即删除、状态查询与剩余时间、日志查询、设置业务有效时长、业务条件查询。
 - REST 接口仅承担必要输入/输出，不重复业务判断。
 - 运行时状态来自 OpenSandbox（不落库）；业务数据写入 SQLite。
 - 创建限制在进程内互斥锁 + 事务中执行（v4 §11.2、§6.3 语义；SQLite 单写者 + 进程互斥，单实例部署）。
@@ -64,6 +64,7 @@ __all__ = [
     "ContainerLimitView",
     "AdminStateView",
     "get_status",
+    "get_container_logs",
     "create_container",
     "get_opensandbox_client",
     "lifecycle_guard",
@@ -465,6 +466,20 @@ def get_status(container_id: str) -> ContainerStatusView:
         gitee_user=row.gitee_user,
         gitee_repository=row.gitee_repository,
     )
+
+
+def get_container_logs(container_id: str) -> str:
+    """读取指定容器日志；管理员可读取仍保留的业务删除记录。"""
+    with session_scope() as session:
+        if ContainerRepository(session).get(container_id) is None:
+            raise ContainerNotFoundError("容器不存在")
+
+    try:
+        return get_opensandbox_client().get_logs(container_id)
+    except SandboxNotFoundError as exc:
+        raise ContainerNotFoundError("后端容器不存在") from exc
+    except Exception as exc:
+        _raise_backend_service_error("获取容器日志错误", exc)
 
 
 # ---------------------------------------------------------------------------

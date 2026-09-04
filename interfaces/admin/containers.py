@@ -1,10 +1,11 @@
 """
-管理端容器与数量限制 API。
+管理端容器、容器日志与数量限制 API。
 """
 
 from __future__ import annotations
 
 from fastapi import APIRouter, Response
+from fastapi.responses import PlainTextResponse
 
 from application import container as container_service
 from application import image as image_service
@@ -28,7 +29,7 @@ __all__ = [
 router = APIRouter(prefix="/admin/containers", tags=["管理员 API (容器操作)"])
 
 
-# 管理端容器接口顺序：增加、批量获取、单项获取、Start、Stop、Restart、删除、永久删除、Expiration、恢复
+# 管理端容器接口顺序：增加、批量获取、单项获取、日志、Start、Stop、Restart、删除、永久删除、Expiration、恢复
 @router.post(
     "",
     response_model=AdminContainerResponse,
@@ -107,6 +108,17 @@ def set_container_limit(request: ContainerLimitRequest) -> ContainerLimitRespons
 def get_container(container_id: str) -> AdminContainerResponse:
     """查询指定容器运行状态，包括业务删除容器。"""
     return _container_response(container_service.get_admin_container(container_id))
+
+
+@router.get(
+    "/{container_id}/log",
+    response_model=None,
+    response_class=PlainTextResponse,
+    responses=api_responses("成功", 200, 404, 502),
+)
+def get_container_log(container_id: str) -> PlainTextResponse:
+    """获取指定容器最新日志。"""
+    return PlainTextResponse(content=container_service.get_container_logs(container_id))
 
 
 register_container_action_routes(router, operation_id_prefix="admin")

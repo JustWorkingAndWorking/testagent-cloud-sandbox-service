@@ -3,6 +3,7 @@ OpenSandbox 集成层（v4 §8）。
 
 - 使用 OpenSandbox 官方 Python 包（同步封装 `SandboxSync`）作为客户端，封装于本模块；
   业务层与接口层不直接依赖原始包细节（v4 §8.1）。
+- 容器日志通过 OpenSandbox 管理面 diagnostics plain-text API 读取，固定请求最后 10000 行。
 - 连接地址与可选 API Key 来自环境变量（v4 §5.1 `TA_SS_OPENSANDBOX_*`）；未设置 Key 不发送（v4 §8.4）。
 - 调用失败或不可达时 MUST 将底层详细错误写日志，对外只抛合理摘要（v4 §8.4）。
 """
@@ -13,7 +14,7 @@ import logging
 from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
 from typing import Optional, TypeVar
-from urllib.parse import urlsplit, urlunsplit
+from urllib.parse import quote, urlsplit, urlunsplit
 from zoneinfo import ZoneInfo
 
 from httpx import Client as HttpxClient
@@ -38,6 +39,7 @@ __all__ = [
 
 #: 默认资源限额（服务端创建沙箱必需 `resourceLimits` 字段）
 _DEFAULT_RESOURCE_LIMITS: dict[str, str] = {"cpu": "1", "memory": "1Gi"}
+_LOG_TAIL = 10000
 _TIMEZONE = ZoneInfo(Constants.TIMEZONE.value)
 _STOPPED_STATES = frozenset({"PAUSED", "EXITED", "STOPPED", "TERMINATED", "DEAD"})
 
@@ -167,6 +169,46 @@ class OpenSandboxClient:
             raise OpenSandboxError("获取容器资源使用率失败") from exc
         memory_usage = (memory_used / memory_total * 100) if memory_total > 0 else 0.0
         return SandboxMetrics(cpu_usage=cpu_usage, memory_usage=memory_usage)
+
+    def get_logs(self, container_id: str) -> str:
+        """获取容器日志；固定请求 OpenSandbox 最后 10000 行。"""
+        path = f"/sandboxes/{quote(str(container_id), safe='')}/diagnostics/logs"
+        headers = {
+            "User-Agent": self._config.user_agent,
+            **self._config.headers,
+            "Accept": "text/plain",
+        }
+        api_key = self._config.get_api_key()
+        if api_key:
+            headers["OPEN-SANDBOX-API-KEY"] = api_key
+
+        try:
+            with HttpxClient(
+                base_url=self._config.get_base_url(),
+                headers=headers,
+                timeout=self._config.request_timeout.total_seconds(),
+            ) as client:
+                response = client.get(path, params={"tail": _LOG_TAIL})
+        except Exception as exc:  # noqa: BLE001
+            logger.error(
+                "OpenSandbox 获取容器日志请求失败: %s: %s: %s",
+                container_id,
+                type(exc).__name__,
+                exc,
+            )
+            raise OpenSandboxError("获取容器日志失败") from exc
+
+        if response.status_code == 404:
+            logger.error("OpenSandbox 获取容器日志失败: %s: HTTP 404", container_id)
+            raise SandboxNotFoundError("获取容器日志失败")
+        if response.status_code != 200:
+            logger.error(
+                "OpenSandbox 获取容器日志失败: %s: HTTP %s",
+                container_id,
+                response.status_code,
+            )
+            raise OpenSandboxError("获取容器日志失败")
+        return response.text
 
     def _get_metrics_raw(self, container_id: str) -> object:
         """通过直连 execd 端点获取 metrics；仅修正服务容器不可达的 loopback 主机。"""
